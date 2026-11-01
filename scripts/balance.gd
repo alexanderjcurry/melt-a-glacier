@@ -27,8 +27,16 @@ const LAYERS = [
 # --- Player -------------------------------------------------------------------------
 const WALK_SPEED := 4.5         # m/s
 const JUMP_VELOCITY := 6.6      # enough to hop up about 1.2 m
-const LOOK_SENSITIVITY_TOUCH := 0.0042   # radians per pixel of finger drag
+const LOOK_SENSITIVITY_TOUCH := 0.0031   # radians per pixel of finger drag
 const LOOK_SENSITIVITY_MOUSE := 0.0025   # radians per pixel of mouse motion
+
+# Jetpack: tap JUMP to hop, keep holding it to fly. Fuel refills on the ground.
+const JET_ACCEL := 34.0          # m/s^2 of thrust (gravity pulls 18)
+const JET_MAX_RISE := 5.5        # fastest climb, m/s
+const JET_FUEL := 2.2            # seconds of thrust on a full tank (upgradable)
+const JET_REFILL := 0.8          # tanks per second while standing on something
+const JET_HOLD_DELAY := 0.16     # hold JUMP this long before the jetpack fires
+const JET_CEILING := 24.0        # can't fly higher than this
 
 # --- Tools (bought in order at the shed) ------------------------------------------------
 # power: hp per second at the centre of the heat zone; radius / range in metres.
@@ -59,6 +67,8 @@ const UPGRADES = [
 		"desc": "+15% meltwater per block"},
 	{"key": "boots", "name": "Crampon Boots", "icon": "🥾", "base": 50.0, "growth": 2.2, "per_level": 0.1, "max": 8,
 		"desc": "+10% walking speed"},
+	{"key": "jet", "name": "Bigger Fuel Tank", "icon": "🚀", "base": 60.0, "growth": 2.1, "per_level": 0.35, "max": 8,
+		"desc": "+35% jetpack flying time"},
 ]
 
 # Helpers melt on their own. Penguins and the sauna crew waddle around on the

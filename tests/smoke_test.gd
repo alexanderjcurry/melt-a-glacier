@@ -107,11 +107,51 @@ func _run() -> void:
 	_drag(2, Vector2(touch.size.x * 0.6 + 60, 200), Vector2(60, 0))
 	await _frames(1)
 	check(player.yaw < yaw0, "dragging right turns right")
+	# Moving the stick while another finger looks must not turn the view.
+	await _frames(1)
+	var yaw1: float = player.yaw
+	_drag(1, Vector2(260, touch.size.y - 240), Vector2(500, 300))   # bogus relative on purpose
+	await _frames(1)
+	check(absf(player.yaw - yaw1) < 0.0001, "moving the stick doesn't turn the camera")
 	_touch(0, touch.melt_center(), false)
 	_touch(1, Vector2(200, touch.size.y - 240), false)
 	_touch(2, Vector2(touch.size.x * 0.6 + 60, 200), false)
 	await _frames(1)
 	check(not touch.melting and touch.move_vector == Vector2.ZERO, "letting go stops everything")
+	# A second finger on the left takes over the stick instead of looking around.
+	_touch(3, Vector2(150, touch.size.y - 150), true)
+	_touch(4, Vector2(300, touch.size.y - 300), true)
+	_drag(4, Vector2(300, touch.size.y - 380), Vector2(0, -80))
+	await _frames(1)
+	var yaw2: float = player.yaw
+	await _frames(1)
+	check(touch.move_vector.y > 0.5 and absf(player.yaw - yaw2) < 0.0001, "two fingers on the left = still the stick")
+	# A lost lift-off (index reused) doesn't leave the melt button stuck on.
+	_touch(5, touch.melt_center(), true)
+	_touch(5, Vector2(touch.size.x * 0.7, 250), true)
+	check(not touch.melting, "a reused finger index lets go of the melt button")
+	touch.release_all()
+	# Respawn button works with a thumb already on the stick.
+	player.position = Vector3(3.0, 0.0, 6.0)
+	_touch(6, Vector2(150, touch.size.y - 150), true)
+	var rb: Control = world.hud.respawn_button
+	_touch(7, rb.get_global_rect().get_center(), true)
+	await _frames(1)
+	check(player.position.distance_to(world.SPAWN) < 0.6, "respawn button (second finger) puts you back at the start")
+	touch.release_all()
+	# Jetpack: hold jump to fly up, fuel runs down, landing refills it.
+	player.position = Vector3(world.SPAWN.x, 0.0, world.SPAWN.z)
+	player.velocity = Vector3.ZERO
+	player._move(0.02)
+	player.jump()
+	player.jet_held = true
+	for _i in 60:
+		player._move(1.0 / 60.0)
+	check(player.position.y > 3.0 and player.fuel < 0.9, "holding jump flies with the jetpack (y=%.1f, fuel %.2f)" % [player.position.y, player.fuel])
+	player.jet_held = false
+	for _i in 400:
+		player._move(1.0 / 60.0)
+	check(player.on_floor and player.fuel > 0.99, "landing refills the fuel")
 
 	# --- The shed: buy a tool, an upgrade and a helper; every tab builds.
 	gs.grant_water(1e6)

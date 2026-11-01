@@ -18,10 +18,13 @@ var bounds_max := Vector3(21.0, 80.0, 20.0)
 # Set by the controls every frame.
 var move_input := Vector2.ZERO      # x = strafe right, y = forward
 var melting := false
+var jet_held := false               # JUMP held down: the jetpack fires in the air
 var input_enabled := true
 
 var velocity := Vector3.ZERO
 var on_floor := false
+var fuel := 1.0                     # jetpack tank, 0..1
+var jetting := false
 var yaw := 0.0
 var pitch := -0.15
 var camera: Camera3D
@@ -36,7 +39,9 @@ var _shown_tool := -1
 var _shown_gold := false
 var _flame: CPUParticles3D
 var _steam: CPUParticles3D
+var _jet: CPUParticles3D
 var _kick := 0.0
+var _hold_t := 0.0
 
 
 func _ready() -> void:
@@ -77,6 +82,17 @@ func _ready() -> void:
 	_steam.local_coords = false
 	add_child(_steam)
 	_steam.top_level = true
+
+	_jet = _make_particles(Color(1.0, 0.75, 0.35, 0.9), Color(0.7, 0.7, 0.75, 0.0), 0.3, 40)
+	_jet.direction = Vector3(0, -1, 0)
+	_jet.spread = 12.0
+	_jet.gravity = Vector3.ZERO
+	_jet.initial_velocity_min = 4.0
+	_jet.initial_velocity_max = 6.0
+	_jet.lifetime = 0.35
+	_jet.position = Vector3(0, 0.55, 0.28)   # a backpack nozzle: visible when you look down
+	_jet.local_coords = false
+	add_child(_jet)
 
 	rotation.y = yaw
 	_head.rotation.x = pitch
@@ -129,6 +145,30 @@ func jump() -> void:
 		on_floor = false
 
 
+func respawn(at: Vector3, p_yaw: float) -> void:
+	position = at
+	velocity = Vector3.ZERO
+	fuel = 1.0
+	set_view(p_yaw, -0.12)
+	unstick()
+
+
+func _update_jetpack(delta: float) -> void:
+	## Hold JUMP: after a short delay the jetpack pushes you up, as long as
+	## there's fuel. Landing on anything refills the tank.
+	var held := jet_held and input_enabled
+	_hold_t = _hold_t + delta if held else 0.0
+	jetting = false
+	if on_floor:
+		fuel = minf(1.0, fuel + delta * Balance.JET_REFILL)
+	elif held and fuel > 0.0 and _hold_t >= Balance.JET_HOLD_DELAY and position.y < Balance.JET_CEILING:
+		jetting = true
+		var v := velocity.y + Balance.JET_ACCEL * delta
+		velocity.y = minf(v, maxf(Balance.JET_MAX_RISE, velocity.y))
+		fuel = maxf(0.0, fuel - delta / GameState.jet_fuel_seconds())
+	_jet.emitting = jetting
+
+
 func aim_dir() -> Vector3:
 	return -camera.global_transform.basis.z
 
@@ -151,6 +191,7 @@ func _move(delta: float) -> void:
 	velocity.x = wish.x
 	velocity.z = wish.z
 	velocity.y -= GRAVITY * delta
+	_update_jetpack(delta)
 	_move_horizontal(Vector3(velocity.x * delta, 0.0, 0.0))
 	_move_horizontal(Vector3(0.0, 0.0, velocity.z * delta))
 	_move_vertical(velocity.y * delta)

@@ -102,6 +102,7 @@ func _ready() -> void:
 	hud.player = player
 	hud.grid = grid
 	add_child(hud)
+	hud.respawn_requested.connect(respawn)
 
 	get_window().size_changed.connect(_fit_render_scale)
 	_fit_render_scale()
@@ -112,6 +113,12 @@ func _ready() -> void:
 	if GameState.has_won:
 		_on_won.call_deferred()
 	_update_slow()
+
+
+func respawn() -> void:
+	## The "I'm stuck" button: back to the start, next to the shed.
+	player.respawn(SPAWN, SPAWN_YAW)
+	hud.toast("🏠 Back at the shed")
 
 
 func _fit_render_scale() -> void:
@@ -147,12 +154,16 @@ func _process(delta: float) -> void:
 	if Input.is_physical_key_pressed(KEY_A) or Input.is_physical_key_pressed(KEY_LEFT):
 		mv.x -= 1.0
 	var touch := hud.touch
+	var jet := Input.is_physical_key_pressed(KEY_SPACE)
 	if touch.visible:
 		mv += touch.move_vector
 		player.add_look(touch.take_look_delta() * Balance.LOOK_SENSITIVITY_TOUCH)
 		if touch.take_jump():
 			player.jump()
+		jet = jet or touch.jump_held
+		touch.fuel = player.fuel
 	player.move_input = mv
+	player.jet_held = jet
 	if Input.mouse_mode != Input.MOUSE_MODE_CAPTURED:
 		_mouse_melt = false
 	player.melting = _mouse_melt or force_melt or (touch.visible and touch.melting)
@@ -191,6 +202,9 @@ func _unhandled_input(event: InputEvent) -> void:
 		match event.physical_keycode:
 			KEY_SPACE:
 				player.jump()
+			KEY_R:
+				if not hud.is_blocking():
+					respawn()
 			KEY_E, KEY_ENTER:
 				if hud.shed_open:
 					hud.close_shed()

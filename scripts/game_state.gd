@@ -133,6 +133,10 @@ func move_speed_mult() -> float:
 	return upgrade_mult("boots")
 
 
+func jet_fuel_seconds() -> float:
+	return Balance.JET_FUEL * upgrade_mult("jet")
+
+
 func sell_mult() -> float:
 	return upgrade_mult("sell")
 

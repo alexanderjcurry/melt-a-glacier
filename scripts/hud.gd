@@ -5,6 +5,8 @@ extends CanvasLayer
 
 const TABS = ["Tools", "Upgrades", "Helpers", "Finds", "Shop"]
 
+signal respawn_requested
+
 var player: Player
 var grid: IceGrid
 var touch: TouchControls
@@ -22,6 +24,8 @@ var tool_label: Label
 var boost_button: Button
 var boost_label: Label
 var shed_button: Button
+var respawn_button: Button
+var fuel_bar: ProgressBar
 var hint_label: Label
 var coach_label: Label
 var crosshair: Crosshair
@@ -74,7 +78,12 @@ func _ready() -> void:
 	_build_bottom()
 	touch = TouchControls.new()
 	root.add_child(touch)
-	touch.exclusions = [boost_button, shed_button]
+	# Tappable with any finger, even while the other thumb is on the stick.
+	touch.buttons = [
+		{"control": shed_button, "action": open_shed},
+		{"control": respawn_button, "action": _on_respawn_pressed},
+		{"control": boost_button, "action": _on_boost_pressed},
+	]
 	toast_box = VBoxContainer.new()
 	toast_box.set_anchors_and_offsets_preset(Control.PRESET_CENTER_TOP)
 	toast_box.offset_top = 80
@@ -115,6 +124,15 @@ func set_touch_mode(on: bool) -> void:
 	touch_mode = on
 	touch.visible = on and not shed_open
 	hint_label.visible = not on
+	# On phones the touch controls tap these (any finger works); the mouse
+	# version would also fire from the first finger, so it's switched off.
+	for b in touch.buttons:
+		(b.control as Control).mouse_filter = Control.MOUSE_FILTER_IGNORE if on else Control.MOUSE_FILTER_STOP
+
+
+func _on_respawn_pressed() -> void:
+	if not is_blocking():
+		respawn_requested.emit()
 
 
 func is_blocking() -> bool:
@@ -152,6 +170,15 @@ func _build_top() -> void:
 	lv.add_child(water_label)
 	rate_label = _label(18, Color(0.7, 0.88, 1.0))
 	lv.add_child(rate_label)
+
+	respawn_button = Button.new()
+	respawn_button.text = "🏠 Stuck? Respawn"
+	respawn_button.position = Vector2(16, 128)
+	respawn_button.custom_minimum_size = Vector2(220, 50)
+	respawn_button.add_theme_font_size_override("font_size", 20)
+	UiTheme.colored_button(respawn_button, Color(0.22, 0.3, 0.45, 0.85), 12)
+	respawn_button.pressed.connect(_on_respawn_pressed)
+	root.add_child(respawn_button)
 
 	var mid := VBoxContainer.new()
 	mid.set_anchors_and_offsets_preset(Control.PRESET_CENTER_TOP)
@@ -243,6 +270,20 @@ func _build_bottom() -> void:
 	shed_button.pressed.connect(open_shed)
 	root.add_child(shed_button)
 
+	fuel_bar = ProgressBar.new()
+	fuel_bar.show_percentage = false
+	fuel_bar.max_value = 1.0
+	fuel_bar.set_anchors_and_offsets_preset(Control.PRESET_CENTER)
+	fuel_bar.offset_left = -60
+	fuel_bar.offset_right = 60
+	fuel_bar.offset_top = 70
+	fuel_bar.offset_bottom = 78
+	fuel_bar.add_theme_stylebox_override("fill", UiTheme.flat(Color(0.45, 0.9, 1.0), 4))
+	fuel_bar.add_theme_stylebox_override("background", UiTheme.flat(Color(0.05, 0.1, 0.2, 0.6), 4))
+	fuel_bar.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	fuel_bar.visible = false
+	root.add_child(fuel_bar)
+
 	hint_label = _label(18, Color(1, 1, 1, 0.85))
 	hint_label.set_anchors_and_offsets_preset(Control.PRESET_CENTER)
 	hint_label.offset_left = -400
@@ -250,7 +291,7 @@ func _build_bottom() -> void:
 	hint_label.offset_top = 80
 	hint_label.offset_bottom = 140
 	hint_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	hint_label.text = "Click to play\nWASD move · mouse look · hold left click to melt · Space jump · E shed · Esc frees the mouse"
+	hint_label.text = "Click to play\nWASD move · mouse look · hold left click to melt · Space jump (hold to fly)\nE shed · R respawn · Esc frees the mouse"
 	root.add_child(hint_label)
 
 
@@ -284,6 +325,8 @@ func _process(delta: float) -> void:
 		crosshair.frac = grid.hp_fraction(t.cell)
 	crosshair.far = _too_far and not t.hit
 	crosshair.queue_redraw()
+	fuel_bar.visible = not touch_mode and player.fuel < 0.999 and not shed_open
+	fuel_bar.value = player.fuel
 	_far_check_timer += delta
 	if _far_check_timer >= 0.2:
 		_far_check_timer = 0.0
@@ -321,6 +364,7 @@ func _refresh() -> void:
 	else:
 		boost_label.text = ""
 	shed_button.visible = near_shed and not shed_open and popups.get_child_count() == 0
+	respawn_button.visible = not shed_open and popups.get_child_count() == 0
 	hint_label.visible = not touch_mode and not shed_open and popups.get_child_count() == 0 \
 		and Input.mouse_mode != Input.MOUSE_MODE_CAPTURED
 	if shed_open:
