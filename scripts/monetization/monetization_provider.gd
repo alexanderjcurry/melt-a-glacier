@@ -15,6 +15,7 @@ signal interstitial_closed(placement: String)
 signal purchase_succeeded(product_id: String)
 signal purchase_failed(product_id: String, reason: String)
 signal purchase_restored(product_id: String)             # one per owned non-consumable
+signal restore_finished(found: int, error: String)        # once per restore_purchases()
 
 
 func provider_name() -> String:
@@ -43,6 +44,20 @@ func purchase(product_id: String) -> void:
 
 
 func restore_purchases() -> void:
+	restore_finished.emit(0, "not implemented")
+
+
+## "Remove ads" was bought: stop loading interstitials.
+func set_ads_removed(_removed: bool) -> void:
+	pass
+
+
+## True when the player must be able to reopen the ad-consent form (EEA/UK).
+func privacy_options_required() -> bool:
+	return false
+
+
+func show_privacy_options() -> void:
 	pass
 
 

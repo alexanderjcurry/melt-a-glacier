@@ -1,0 +1,77 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024">
+  <!-- App icon master. Full-bleed square, no transparency (the stores round the corners).
+       Rendered to PNGs by art/icon/make_icons.sh. -->
+  <defs>
+    <linearGradient id="sky" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#3f9fe8"/>
+      <stop offset="0.62" stop-color="#9ad6ff"/>
+      <stop offset="1" stop-color="#d8f1ff"/>
+    </linearGradient>
+    <linearGradient id="ice" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#f4fcff"/>
+      <stop offset="0.55" stop-color="#bfe8fb"/>
+      <stop offset="1" stop-color="#7cc6ec"/>
+    </linearGradient>
+    <linearGradient id="iceSide" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#8fd1f2"/>
+      <stop offset="1" stop-color="#4fa6d8"/>
+    </linearGradient>
+    <linearGradient id="dryer" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#ff8db1"/>
+      <stop offset="1" stop-color="#e2507f"/>
+    </linearGradient>
+    <linearGradient id="water" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#4fb3ec"/>
+      <stop offset="1" stop-color="#2a86c9"/>
+    </linearGradient>
+  </defs>
+
+  <rect width="1024" height="1024" fill="url(#sky)"/>
+  <!-- distant mountains -->
+  <path d="M0 640 L170 470 L290 560 L430 400 L560 540 L700 430 L860 560 L1024 470 L1024 700 L0 700 Z" fill="#cfe9f7"/>
+  <path d="M430 400 L480 455 L455 470 L430 445 L405 470 L385 455 Z M700 430 L745 475 L720 488 L700 468 L680 488 L660 475 Z" fill="#ffffff"/>
+
+  <g transform="translate(-50 0)">
+  <!-- puddle -->
+  <ellipse cx="470" cy="868" rx="380" ry="84" fill="url(#water)"/>
+  <ellipse cx="410" cy="850" rx="210" ry="30" fill="#8fd6ff" opacity="0.55"/>
+
+  <!-- the glacier block, top melting into drips -->
+  <path d="M170 520 L250 360 L560 330 L690 420 L700 800 Q690 846 640 850 L240 852 Q190 848 182 800 Z" fill="url(#iceSide)"/>
+  <path d="M170 520 L250 360 L560 330 L690 420 L600 470 L250 500 Z" fill="url(#ice)"/>
+  <path d="M250 500 L600 470 L690 420 L700 800 Q690 846 640 850 L262 852 Q236 820 250 780 Z" fill="#a9def7"/>
+  <!-- melt notch where the hot air hits -->
+  <path d="M690 470 Q610 520 640 600 Q600 650 690 700 Z" fill="#7fc3e8"/>
+  <!-- facets / shine -->
+  <path d="M300 540 L360 530 L330 760 L290 770 Z" fill="#ffffff" opacity="0.55"/>
+  <path d="M400 525 L430 522 L415 640 L392 642 Z" fill="#ffffff" opacity="0.4"/>
+  <!-- drips -->
+  <path d="M330 852 Q330 905 352 905 Q374 905 374 852 Z" fill="#a9def7"/>
+  <path d="M520 852 Q520 930 545 930 Q570 930 570 852 Z" fill="#a9def7"/>
+  <path d="M650 840 Q650 885 668 885 Q686 885 686 840 Z" fill="#a9def7"/>
+
+  </g>
+  <!-- hot air -->
+  <g fill="none" stroke="#ffb347" stroke-linecap="round" stroke-width="20" opacity="0.95">
+    <path d="M735 520 Q712 505 690 520 Q668 535 646 520"/>
+    <path d="M740 575 Q717 560 694 575 Q671 590 648 575"/>
+    <path d="M735 630 Q712 615 690 630 Q668 645 646 630"/>
+  </g>
+
+  <!-- hair dryer -->
+  <g transform="translate(915 575) scale(0.86) rotate(-4)">
+    <rect x="-140" y="-70" width="190" height="140" rx="62" fill="url(#dryer)"/>
+    <rect x="-170" y="-46" width="60" height="92" rx="18" fill="#b8355f"/>
+    <rect x="-186" y="-38" width="22" height="76" rx="8" fill="#3b2a3a"/>
+    <path d="M-10 40 L70 40 L95 260 Q97 290 66 290 L30 290 Q4 290 2 262 Z" fill="url(#dryer)"/>
+    <rect x="18" y="110" width="54" height="22" rx="10" fill="#ffffff" opacity="0.85"/>
+    <circle cx="10" cy="0" r="38" fill="#ffd1df"/>
+    <circle cx="10" cy="0" r="18" fill="#e2507f"/>
+    <path d="M-110 -50 Q-60 -64 -10 -56" stroke="#ffffff" stroke-width="12" stroke-linecap="round" fill="none" opacity="0.6"/>
+  </g>
+
+  <!-- sun -->
+  <circle cx="168" cy="170" r="126" fill="#fff0b3"/>
+  <circle cx="168" cy="170" r="92" fill="#ffd34d"/>
+  
+</svg>

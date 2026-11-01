@@ -1,6 +1,6 @@
 # A Game About Melting A Glacier (prototype)
 
-A first-person, landscape incremental game made in **Godot 4.4**. You walk around
+A first-person, landscape incremental game made in **Godot 4.7**. You walk around
 a valley that's buried under a glacier, aim a hair dryer at the ice and slowly
 dig into it. Meltwater is money: spend it at the shed on hotter tools,
 upgrades and helpers (penguins with tiny torches, a sauna crew, an adopted
@@ -41,7 +41,7 @@ only work in the native app builds.
 
 ## Run it on Windows (5 minutes)
 
-1. Download **Godot 4.4.x (Standard, not .NET)** from https://godotengine.org/download/windows/ and unzip it. There's no installer.
+1. Download **Godot 4.7.2 (Standard, not .NET)** from https://godotengine.org/download/windows/ and unzip it. There's no installer.
 2. Open Godot, click **Import**, and pick `project.godot` in this folder.
 3. Press **F5** (or the ▶ button). Click in the window to grab the mouse.
 
@@ -58,11 +58,10 @@ Fastest path, no APK needed:
 1. On the phone, enable **Developer options**, then turn on **USB debugging**.
 2. In Godot, open **Editor > Manage Export Templates** and click **Download and Install**.
 3. Install **JDK 17** and the **Android SDK** (the easiest way is to install Android Studio once). Then set their paths in **Editor > Editor Settings > Export > Android**.
-4. Plug the phone in. An Android icon appears at the top right of Godot. Click it to install and run the game on the phone.
+4. In Godot, run **Project > Install Android Build Template** once (the ads and store plugins need the Gradle build).
+5. Plug the phone in. An Android icon appears at the top right of Godot. Click it to install and run the game on the phone.
 
-To make an APK you can share, use **Project > Export > Android > Export Project**. A preset is already included. Change `package/unique_name` from `com.example.meltaglacier` to your own (for example `com.yourname.meltaglacier`) before you ever upload to Google Play, because you can't change it later.
-
-iOS comes later through Codemagic (Godot workflow). Nothing in the code is Android-only.
+Store builds (Android App Bundle, and the iPhone build on Codemagic) are made by CI: see [docs/LAUNCH.md](docs/LAUNCH.md).
 
 ## What's in the prototype
 
@@ -147,17 +146,11 @@ between. Each tool costs roughly what the glacier pays out while you use the
 tool before it, so to slow a part down, raise the next tool's cost or the hp of
 the layers it has to get through.
 
-## Adding real ads and purchases later
+## Ads, purchases and publishing
 
-The game only ever calls the `Monetization` autoload. That autoload forwards to one `MonetizationProvider`. Right now that provider is `StubMonetizationProvider`, which shows a fake 3-second "ad" and approves every purchase, so you can test the whole flow.
+Real ads (AdMob, with the EU consent form and the iPhone tracking prompt) and real purchases (RevenueCat) are wired in. On a phone the game uses them; in the editor and the web playtest it uses the stub with pretend ads and free purchases. Every id lives in `scripts/monetization/store_config.gd`.
 
-To go live:
-1. Install the plugins. For ads, use the **Poing Studios Godot AdMob plugin**. For purchases, use the official **GodotGooglePlayBilling** plugin (Android) and an iOS StoreKit plugin later. If you want one purchase API across both stores, RevenueCat has a Godot community plugin too.
-2. Create `scripts/monetization/admob_billing_provider.gd` that `extends MonetizationProvider`. Implement `initialize`, `show_rewarded`, `show_interstitial`, `purchase`, `restore_purchases` and `price_string`, and emit the matching signals.
-3. Return your new provider from `_create_provider()` in `scripts/monetization/monetization.gd`.
-4. Create the same IDs in the store consoles: products `remove_ads_2x` and `golden_hair_dryer` (both non-consumable), and the rewarded placement `boost_2x_heat`.
-
-No game code changes beyond that.
+How to publish, step by step, including what only the account owner can do: **[docs/LAUNCH.md](docs/LAUNCH.md)**.
 
 ## Placeholder art
 

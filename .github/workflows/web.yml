@@ -18,15 +18,15 @@ concurrency:
   group: pages
   cancel-in-progress: true
 
-env:
-  GODOT_VERSION: "4.4.1"
-
 jobs:
   build:
     runs-on: ubuntu-24.04
     steps:
       - name: Check out
         uses: actions/checkout@v4
+
+      - name: Read pinned versions
+        run: cat tools/plugin_versions.env >> "$GITHUB_ENV"
 
       - name: Restore Godot from cache
         id: godot-cache
@@ -63,6 +63,8 @@ jobs:
           mkdir -p build/web
           timeout 600 ~/godot/godot --headless --export-release "Web" build/web/index.html
           test -s build/web/index.wasm
+          # The privacy policy the stores link to lives next to the game.
+          cp docs/privacy.html build/web/privacy.html
           ls -la build/web
 
       - name: Upload the build for Pages

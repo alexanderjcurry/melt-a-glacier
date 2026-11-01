@@ -1,0 +1,103 @@
+# iPhone builds on Codemagic (a Mac in the cloud): Godot exports the Xcode
+# project, Xcode builds and signs it, and the result goes to TestFlight.
+# Setup steps (once): docs/LAUNCH.md, section "iPhone: Codemagic".
+#
+# Start a build: Codemagic > melt-a-glacier > "Start new build", or push a tag
+# like v1.0.3 (after turning on the tag trigger in Codemagic's webhook settings).
+
+workflows:
+  ios-testflight:
+    name: iPhone to TestFlight
+    instance_type: mac_mini_m2
+    max_build_duration: 90
+    integrations:
+      # The name you gave the App Store Connect API key in Codemagic
+      # (Team settings > Integrations > Developer Portal).
+      app_store_connect: Melt a Glacier ASC key
+    environment:
+      groups:
+        - apple   # APPLE_TEAM_ID (10 characters), APP_STORE_APPLE_ID (the app's numeric Apple ID)
+      ios_signing:
+        distribution_type: app_store
+        bundle_identifier: com.alexcurry.meltaglacier
+      xcode: latest
+      vars:
+        PROJECT: build/ios/MeltAGlacier.xcodeproj
+    triggering:
+      events:
+        - tag
+      tag_patterns:
+        - pattern: "v*"
+    cache:
+      cache_paths:
+        - $HOME/godot-cache
+        - $HOME/.cache/melt-a-glacier-plugins
+    scripts:
+      - name: Install Godot and the iOS export template
+        script: |
+          set -euo pipefail
+          source tools/plugin_versions.env
+          echo "GODOT_VERSION=$GODOT_VERSION" >> $CM_ENV
+          base="https://github.com/godotengine/godot/releases/download/${GODOT_VERSION}-stable"
+          cache="$HOME/godot-cache/$GODOT_VERSION"
+          mkdir -p "$cache"
+          if [ ! -d "$cache/Godot.app" ]; then
+            curl -fsSL --retry 3 -o /tmp/godot.zip "$base/Godot_v${GODOT_VERSION}-stable_macos.universal.zip"
+            unzip -q /tmp/godot.zip -d "$cache"
+            curl -fsSL --retry 3 -o /tmp/templates.tpz "$base/Godot_v${GODOT_VERSION}-stable_export_templates.tpz"
+            unzip -q -j /tmp/templates.tpz 'templates/ios.zip' 'templates/version.txt' -d "$cache/templates"
+            rm -f /tmp/godot.zip /tmp/templates.tpz
+          fi
+          templates="$HOME/Library/Application Support/Godot/export_templates/${GODOT_VERSION}.stable"
+          mkdir -p "$templates"
+          cp "$cache/templates/"* "$templates/"
+          echo "GODOT=$cache/Godot.app/Contents/MacOS/Godot" >> $CM_ENV
+
+      - name: Fetch the native ad and store plugins
+        script: bash tools/fetch_plugins.sh ios
+
+      - name: Import and test
+        script: |
+          set -euo pipefail
+          "$GODOT" --headless --import
+          "$GODOT" --headless -s res://tests/smoke_test.gd
+          "$GODOT" --headless -s res://tests/monetization_test.gd
+          "$GODOT" --headless -s res://tests/release_check.gd -- iOS
+
+      - name: Team id and build number
+        script: |
+          set -euo pipefail
+          latest=$(app-store-connect get-latest-testflight-build-number "$APP_STORE_APPLE_ID" || echo 0)
+          build=$((latest + 1))
+          sed -i '' "s/^application\/app_store_team_id=.*/application\/app_store_team_id=\"$APPLE_TEAM_ID\"/" export_presets.cfg
+          sed -i '' "s/^application\/version=.*/application\/version=\"$build\"/" export_presets.cfg
+          if [[ "${CM_TAG:-}" == v* ]]; then
+            sed -i '' "s/^application\/short_version=.*/application\/short_version=\"${CM_TAG#v}\"/" export_presets.cfg
+          fi
+          grep -E "^application/(app_store_team_id|version|short_version)=" export_presets.cfg
+
+      - name: Export the Xcode project from Godot
+        script: |
+          set -euo pipefail
+          mkdir -p build/ios
+          "$GODOT" --headless --export-release "iOS" build/ios/MeltAGlacier.ipa
+          test -d "$PROJECT"
+
+      - name: Signing
+        script: xcode-project use-profiles
+
+      - name: Build the .ipa
+        script: |
+          set -euo pipefail
+          scheme=$(xcodebuild -list -json -project "$PROJECT" | python3 -c "import json,sys; print(json.load(sys.stdin)['project']['schemes'][0])")
+          echo "Scheme: $scheme"
+          xcode-project build-ipa --project "$PROJECT" --scheme "$scheme"
+
+    artifacts:
+      - build/ios/ipa/*.ipa
+      - /tmp/xcodebuild_logs/*.log
+
+    publishing:
+      app_store_connect:
+        auth: integration
+        submit_to_testflight: true

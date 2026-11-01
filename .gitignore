@@ -1,7 +1,15 @@
 .godot/
 /android/
+/ios/
 /build/
 *.apk
 *.aab
+*.ipa
+*.keystore
+*.jks
 export_credentials.cfg
 __pycache__/
+# Native plugin binaries: fetched by tools/fetch_plugins.sh
+/addons/admob/android/bin/
+/addons/admob/ios/bin/
+/addons/admob/downloads/

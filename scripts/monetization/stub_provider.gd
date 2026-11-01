@@ -37,7 +37,8 @@ func purchase(product_id: String) -> void:
 func restore_purchases() -> void:
 	# A real store returns what the account owns. The stub owns nothing extra;
 	# GameState already remembers stub purchases in the save file.
-	pass
+	await get_tree().create_timer(0.4).timeout
+	restore_finished.emit(0, "")
 
 
 func price_string(_product_id: String, fallback: String) -> String:

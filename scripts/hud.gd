@@ -109,10 +109,20 @@ func _ready() -> void:
 	GameState.discovered_item.connect(_on_discovered)
 	Monetization.purchase_error.connect(_on_purchase_error)
 	Monetization.purchases_changed.connect(_on_purchases_changed)
+	Monetization.restore_done.connect(_on_restore_done)
 
 
 func _on_purchase_error(_id: String, reason: String) -> void:
 	toast("Purchase failed: %s" % reason)
+
+
+func _on_restore_done(found: int, error: String) -> void:
+	if error != "":
+		toast("Couldn't restore: %s" % error)
+	elif found == 0:
+		toast("Nothing to restore on this account")
+	else:
+		toast("Purchases restored ✔️")
 
 
 func _on_purchases_changed() -> void:
@@ -768,7 +778,14 @@ func _build_catalogue_rows() -> void:
 	restore.set_button("Restore", true)
 	restore.button.pressed.connect(func():
 		Monetization.restore()
-		toast("Restore requested"))
+		toast("Checking the store..."))
+	if Monetization.privacy_options_required():
+		var privacy := _row("🛡️", "Ad privacy choices", "Change what you agreed to about ads.")
+		privacy.set_button("Change", true)
+		privacy.button.pressed.connect(Monetization.show_privacy_options)
+	var policy := _row("📄", "Privacy policy", "What the game collects (only what ads and the store need).")
+	policy.set_button("Read", true)
+	policy.button.pressed.connect(func(): OS.shell_open(StoreConfig.PRIVACY_POLICY_URL))
 
 	# Dev tools: in the editor, and in exports tagged "playtest" (the web build).
 	# Remove the tag from export_presets.cfg before shipping.
