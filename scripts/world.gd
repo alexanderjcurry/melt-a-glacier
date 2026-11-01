@@ -302,6 +302,10 @@ func _unhandled_input(event: InputEvent) -> void:
 			KEY_R:
 				if not hud.is_blocking():
 					respawn()
+			KEY_C, KEY_TAB:
+				hud.toggle_catalogue()
+			KEY_B:
+				hud.take_offer()
 			KEY_E, KEY_ENTER:
 				if hud.catalogue_open:
 					hud.close_catalogue()

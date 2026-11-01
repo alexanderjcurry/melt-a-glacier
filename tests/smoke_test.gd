@@ -301,6 +301,14 @@ func _run() -> void:
 	root.push_input(key)
 	await _frames(1)
 	check(not hud.catalogue_open and player.input_enabled, "and closes again")
+	# It's also a button on the HUD, anywhere.
+	hud.toggle_catalogue()
+	await _frames(1)
+	check(hud.catalogue_open and not hud.catalogue_button.visible, "the HUD's catalogue button opens it too")
+	hud.toggle_catalogue()
+	await _frames(1)
+	check(not hud.catalogue_open and player.input_enabled, "and closes it")
+	await _ad_offers(gs, hud, player)
 	# Walk back out.
 	player.position = Vector3(6.5, 0.0, 11.5)
 	await _frames(2)
@@ -574,3 +582,55 @@ func _run() -> void:
 	gs.wipe_save()
 	print("SMOKE TEST ", "PASSED" if ok else "FAILED")
 	quit(0 if ok else 1)
+
+
+func _ad_offers(gs, hud, player) -> void:
+	## A timed offer tag drops in, is worth having, can be watched, and goes away.
+	var mon = root.get_node("Monetization")
+	var offers = hud.offers
+	check(offers.current == "" and not hud.offer_tag.visible, "no ad offer in the first minutes")
+	gs.water = 500.0
+	offers._wait = 0.0
+	await _frames(2)
+	check(offers.current != "" and hud.offer_tag.visible, "an ad offer tag drops in (%s)" % offers.current)
+	# Let it run out: the next one waits longer.
+	offers.time_left = 0.01
+	await _frames(2)
+	check(offers.current == "" and offers._wait > 200.0, "ignored, it goes away and the next one waits longer (%ds)" % int(offers._wait))
+	# Double water: pays your water again, capped by recent income.
+	gs.water = 1000.0
+	var amount: float = gs.double_water_amount()
+	check(amount > 0.0 and amount <= 1000.0, "double water pays at most your water (%s)" % amount)
+	offers.current = "double_water"
+	offers.time_left = 30.0
+	hud.offer_tag.visible = true
+	hud.take_offer()
+	await _frames(1)
+	check(offers.watching and mon.is_watching(), "tapping the tag plays the rewarded ad")
+	mon.provider._close()
+	mon.provider.rewarded_completed.emit("double_water")
+	await _frames(1)
+	check(absf(gs.water - (1000.0 + amount)) < 5.0 and offers.current == "" and player.input_enabled,
+		"watching it to the end doubles the water and the tag goes (%s)" % gs.water)
+	# Helpers 3x needs helpers; it speeds them up for a while.
+	var before: float = gs.total_helper_power()
+	hud.watch_ad("helper_rush")
+	mon.provider._close()
+	mon.provider.rewarded_completed.emit("boost_2x_heat")   # wrong placement: nothing
+	mon.provider.rewarded_completed.emit("helper_rush")
+	await _frames(1)
+	check(gs.is_helper_rush_active() and absf(gs.total_helper_power() - before * 3.0) < 0.01, "helpers work 3x after the helper ad")
+	gs.helper_rush_until = 0.0
+	# Closing an ad early gives nothing.
+	var w: float = gs.water
+	hud.watch_ad("heat_rush")
+	mon.provider._close()
+	mon.provider.rewarded_failed.emit("boost_2x_heat", "closed early")
+	await _frames(1)
+	check(not gs.is_boost_active() and gs.water == w and player.input_enabled, "closing the ad early gives no reward")
+	# The catalogue lists the free bonuses.
+	hud.open_catalogue()
+	await _frames(1)
+	check(hud._list_box.get_child_count() >= 8, "the catalogue lists the free bonuses and the shop")
+	hud.close_catalogue()
+	offers._wait = 9999.0

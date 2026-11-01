@@ -83,7 +83,8 @@ iOS comes later through Codemagic (Godot workflow). Nothing in the code is Andro
 | The valley greens up and flowers bloom where the ice is gone; villagers come out at the end | `World._update_slow()` |
 | Loose ice melts by itself: bits left floating, and small chunks on the ground (under about 4 m³), shrink away over a few seconds, corners first, and still pay out | `IceField._melt_floating()` |
 | No "while you were away" earnings: it's a game you play in a sitting, so nothing melts while it's closed | |
-| Rewarded ad: 2x heat for 5 min (stacks to 15). IAP: Remove Ads + permanent 2x, Golden Hair Dryer, Restore | HUD button, the catalogue in the shed |
+| The catalogue: a button at the top right of the HUD (C or Tab on a computer), or the book in the shed. Free bonuses for a rewarded ad: 2x heat for 5 min (stacks to 15), helpers work 3x for 3 min, and double your water (capped at about 4 minutes of your recent income). IAP: Remove Ads + permanent 2x, Golden Hair Dryer, Restore | `Hud.open_catalogue()`, `Balance.AD_REWARDS`, `GameState.grant_ad_reward()` |
+| Timed ad offers: now and then a paper tag swings down under the catalogue button ("FREE BONUS: Double your water, +💧 70K, enough for the Flamethrower!"). Tap it (or press B) to watch. Kept gentle on purpose: none in the first 2.5 minutes, one at a time, gone after 40 s, the next one waits longer each time you let one pass (200 s up to 8 min), only offers that are worth having right now, and never one whose ad hasn't loaded. After you choose a rewarded ad, no interstitial for a while | `scripts/ad_offers.gd`, `Balance.OFFER_*`, `Hud._update_offer()` |
 | Light interstitials: only when leaving the shed, after 15% of the ice is gone, at most every 4 min, never with Remove Ads | `Monetization.maybe_show_interstitial()` |
 | A popup when the village is free, an ending with a stats screen when the lake is, then walk around or melt a new valley | `Hud.show_stage_done()`, `Hud.show_ending()` |
 | Short onboarding hints the first time | `World._update_coach()` |
@@ -115,6 +116,7 @@ scripts/helpers.gd       penguins, sauna crew, Kevin the volcano
 scripts/hud.gd           HUD, shed price card, catalogue, toasts, popups, ending
 scripts/ui_theme.gd      shared UI look, emoji font, particle texture
 scripts/shop_row.gd      one catalogue row
+scripts/ad_offers.gd     when the HUD's timed ad-offer tag shows up, and which reward it offers
 scripts/fmt.gd           1.23K / 4.5M number formatting
 scripts/monetization/    ad + IAP interface, stub provider, autoload facade
 shaders/                 ice, mountain rock and snow, sky, water, shed wood, the tools' heat beam
@@ -155,7 +157,7 @@ To go live:
 1. Install the plugins. For ads, use the **Poing Studios Godot AdMob plugin**. For purchases, use the official **GodotGooglePlayBilling** plugin (Android) and an iOS StoreKit plugin later. If you want one purchase API across both stores, RevenueCat has a Godot community plugin too.
 2. Create `scripts/monetization/admob_billing_provider.gd` that `extends MonetizationProvider`. Implement `initialize`, `show_rewarded`, `show_interstitial`, `purchase`, `restore_purchases` and `price_string`, and emit the matching signals.
 3. Return your new provider from `_create_provider()` in `scripts/monetization/monetization.gd`.
-4. Create the same IDs in the store consoles: products `remove_ads_2x` and `golden_hair_dryer` (both non-consumable), and the rewarded placement `boost_2x_heat`.
+4. Create the same IDs in the store consoles: products `remove_ads_2x` and `golden_hair_dryer` (both non-consumable), and the rewarded placements `boost_2x_heat`, `double_water` and `helper_rush` (`Monetization.PLACEMENT_*`).
 
 No game code changes beyond that.
 

@@ -12,8 +12,12 @@ extends Node
 signal purchases_changed
 signal purchase_error(product_id: String, reason: String)
 
-# Rewarded ad placements (use these as AdMob ad unit keys too).
+# Rewarded ad placements (use these as AdMob ad unit keys too). Each one is a
+# reward in Balance.AD_REWARDS, offered in the catalogue and on the HUD's
+# timed offer tag (Hud, AdOffers).
 const PLACEMENT_BOOST := "boost_2x_heat"
+const PLACEMENT_DOUBLE_WATER := "double_water"
+const PLACEMENT_HELPER_RUSH := "helper_rush"
 
 # Store product ids (create the same ids in Play Console / App Store Connect).
 const PRODUCT_REMOVE_ADS_2X := "remove_ads_2x"      # non-consumable, $2.99
@@ -61,7 +65,21 @@ func show_rewarded(placement: String, on_done: Callable) -> void:
 	provider.show_rewarded(placement)
 
 
+func watch_for_reward(kind: String, on_done: Callable) -> void:
+	## Show the rewarded ad for one of Balance.AD_REWARDS; if it's watched to
+	## the end, grant the reward. on_done(ok: bool, text: String) says what you got.
+	var placement: String = Balance.AD_REWARDS[kind].placement
+	show_rewarded(placement, func(ok: bool):
+		on_done.call(ok, GameState.grant_ad_reward(kind) if ok else ""))
+
+
+func is_watching() -> bool:
+	return not _reward_callbacks.is_empty()
+
+
 func _on_rewarded_completed(placement: String) -> void:
+	# Someone who just chose to watch an ad shouldn't get an unasked one next.
+	_last_interstitial = Time.get_unix_time_from_system()
 	var cb: Callable = _reward_callbacks.get(placement, Callable())
 	_reward_callbacks.erase(placement)
 	if cb.is_valid():

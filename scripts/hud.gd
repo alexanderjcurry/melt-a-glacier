@@ -2,7 +2,9 @@ class_name Hud
 extends CanvasLayer
 ## Everything drawn over the 3D view: meltwater, glacier progress, crosshair,
 ## phone controls, toasts, the card for whatever you're looking at in the shed,
-## the catalogue, and popups. Built in code.
+## the catalogue (a button at the top right, or the book in the shed), the
+## timed ad-offer tag that hangs under it now and then (AdOffers), and popups.
+## Built in code.
 
 const PAPER := Color(0.97, 0.93, 0.83)
 const INK := Color(0.27, 0.16, 0.09)
@@ -24,8 +26,10 @@ var ice_label: Label
 var ice_bar: ProgressBar
 var target_label: Label
 var tool_label: Label
-var boost_button: Button
-var boost_label: Label
+var catalogue_button: Button
+var boost_label: Label             # running ad rewards: "🔥 2x 4m 10s"
+var offers := AdOffers.new()
+var offer_tag: PanelContainer      # "FREE BONUS: double your water" under the catalogue button
 var respawn_button: Button
 var fuel_bar: ProgressBar
 var hint_label: Label
@@ -51,6 +55,13 @@ var _too_far := false
 var _ending_shown := false
 var find_hint: Callable                # World.find_hint_at: a find frozen near this spot, or -1
 var _find_card: Control
+var _offer_header: Label
+var _offer_title: Label
+var _offer_pitch: Label
+var _offer_bar: ProgressBar
+var _offer_stamp: Label
+var _offer_t := 0.0
+var _offer_swing := 0.0            # the tag swings when it drops in, then settles
 
 
 class Crosshair:
@@ -90,7 +101,8 @@ func _ready() -> void:
 	# Tappable with any finger, even while the other thumb is on the stick.
 	touch.buttons = [
 		{"control": respawn_button, "action": _on_respawn_pressed},
-		{"control": boost_button, "action": _on_boost_pressed},
+		{"control": catalogue_button, "action": toggle_catalogue},
+		{"control": offer_tag, "action": take_offer},
 	]
 	toast_box = VBoxContainer.new()
 	toast_box.set_anchors_and_offsets_preset(Control.PRESET_CENTER_TOP)
@@ -221,13 +233,75 @@ func _build_top() -> void:
 	root.add_child(right)
 	boost_label = _label(20, Color(1.0, 0.8, 0.4))
 	UiTheme.outlined(boost_label, 21, Color(1.0, 0.8, 0.4), 7)
+	boost_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
+	boost_label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
 	right.add_child(boost_label)
-	boost_button = Button.new()
-	boost_button.text = "📺 2x heat"
-	boost_button.custom_minimum_size = Vector2(150, 60)
-	UiTheme.colored_button(boost_button, Color(0.95, 0.55, 0.2))
-	boost_button.pressed.connect(_on_boost_pressed)
-	right.add_child(boost_button)
+	catalogue_button = Button.new()
+	catalogue_button.text = "📖 Catalogue"
+	catalogue_button.custom_minimum_size = Vector2(196, 60)
+	catalogue_button.add_theme_font_size_override("font_size", 25)
+	UiTheme.colored_button(catalogue_button, Color(0.72, 0.3, 0.2))
+	catalogue_button.pressed.connect(toggle_catalogue)
+	right.add_child(catalogue_button)
+	_build_offer_tag()
+
+
+func _build_offer_tag() -> void:
+	## A paper tag that drops down under the catalogue button when there's an
+	## ad offer on. Tap it (or press B) to watch; it goes away by itself.
+	offer_tag = PanelContainer.new()
+	offer_tag.add_theme_stylebox_override("panel", UiTheme.paper(16.0))
+	offer_tag.anchor_left = 1.0
+	offer_tag.anchor_right = 1.0
+	offer_tag.offset_left = -330
+	offer_tag.offset_right = -16
+	offer_tag.offset_top = 84
+	offer_tag.grow_horizontal = Control.GROW_DIRECTION_BEGIN   # stays on screen, hangs left
+	offer_tag.mouse_filter = Control.MOUSE_FILTER_STOP
+	offer_tag.mouse_default_cursor_shape = Control.CURSOR_POINTING_HAND
+	offer_tag.visible = false
+	offer_tag.gui_input.connect(func(e: InputEvent):
+		if e is InputEventMouseButton and e.pressed and e.button_index == MOUSE_BUTTON_LEFT \
+				and e.device != InputEvent.DEVICE_ID_EMULATION:
+			take_offer())
+	root.add_child(offer_tag)
+	var v := VBoxContainer.new()
+	v.add_theme_constant_override("separation", 0)
+	v.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	offer_tag.add_child(v)
+	_offer_header = _ink(17, Color(0.75, 0.24, 0.16))
+	_offer_header.add_theme_font_override("font", UiTheme.display_font())
+	_offer_header.text = "📺 FREE BONUS"
+	v.add_child(_offer_header)
+	_offer_title = _ink(25)
+	_offer_title.add_theme_font_override("font", UiTheme.display_font())
+	_offer_title.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	_offer_title.custom_minimum_size = Vector2(282, 0)
+	v.add_child(_offer_title)
+	_offer_pitch = _ink(17, INK_SOFT)
+	_offer_pitch.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	_offer_pitch.custom_minimum_size = Vector2(282, 0)
+	v.add_child(_offer_pitch)
+	var h := HBoxContainer.new()
+	h.add_theme_constant_override("separation", 10)
+	h.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	v.add_child(h)
+	_offer_bar = ProgressBar.new()
+	_offer_bar.show_percentage = false
+	_offer_bar.max_value = 1.0
+	_offer_bar.custom_minimum_size = Vector2(0, 18)
+	_offer_bar.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	_offer_bar.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	_offer_bar.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	UiTheme.bar_styles(_offer_bar, Color(1.0, 0.72, 0.3))
+	h.add_child(_offer_bar)
+	var stamp := PanelContainer.new()
+	stamp.add_theme_stylebox_override("panel", UiTheme.enamel(Color(0.2, 0.52, 0.27)))
+	stamp.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	h.add_child(stamp)
+	_offer_stamp = _ink(20, UiTheme.CREAM)
+	UiTheme.outlined(_offer_stamp, 20, UiTheme.CREAM, 6)
+	stamp.add_child(_offer_stamp)
 
 
 func _build_center() -> void:
@@ -292,7 +366,7 @@ func _build_bottom() -> void:
 	hint_label.offset_top = 80
 	hint_label.offset_bottom = 140
 	hint_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	hint_label.text = "Click to play\nWASD move · mouse look · hold left click to melt · Space jump (hold to fly)\nWalk into the 🏠 shed to shop · R respawn · Esc frees the mouse"
+	hint_label.text = "Click to play\nWASD move · mouse look · hold left click to melt · Space jump (hold to fly)\nWalk into the 🏠 shed to shop · C catalogue · R respawn · Esc frees the mouse"
 	root.add_child(hint_label)
 
 
@@ -333,6 +407,7 @@ func _process(delta: float) -> void:
 		_too_far = false
 		if not t.hit and grid != null:
 			_too_far = player.ray(80.0).hit
+	_update_offer(delta)
 	_refresh_timer += delta
 	if _refresh_timer >= 0.15:
 		_refresh_timer = 0.0
@@ -371,10 +446,15 @@ func _refresh() -> void:
 		target_label.text = ""
 	var td: Dictionary = GameState.tool_def()
 	tool_label.text = "%s %s" % [td.icon, td.name]
+	var running: Array = []
 	if GameState.is_boost_active():
-		boost_label.text = "🔥 2x " + Fmt.duration(GameState.boost_seconds_left())
-	else:
-		boost_label.text = ""
+		running.append("🔥 2x " + Fmt.duration(GameState.boost_seconds_left()))
+	if GameState.is_helper_rush_active():
+		running.append("🐧 3x " + Fmt.duration(GameState.helper_rush_seconds_left()))
+	boost_label.text = "\n".join(running)
+	if GameState.is_helper_rush_active() and rate > 0.0:
+		rate_label.text += "  (3x!)"
+	catalogue_button.visible = not catalogue_open and popups.get_child_count() == 0
 	respawn_button.visible = not catalogue_open and popups.get_child_count() == 0
 	hint_label.visible = not touch_mode and not catalogue_open and popups.get_child_count() == 0 \
 		and Input.mouse_mode != Input.MOUSE_MODE_CAPTURED
@@ -522,13 +602,102 @@ static func _whats_next(i: int) -> String:
 	return text
 
 
-func _on_boost_pressed() -> void:
-	Monetization.show_rewarded(Monetization.PLACEMENT_BOOST, func(ok: bool):
-		if ok:
-			GameState.start_boost()
-			toast("🔥 2x heat for 5 minutes!")
-		else:
-			toast("No reward this time"))
+# =====================================================================================
+# Ad offers: a tag under the catalogue button now and then (see AdOffers)
+# =====================================================================================
+func _update_offer(delta: float) -> void:
+	var playing := not is_blocking() and player.input_enabled and not Monetization.is_watching()
+	match offers.update(delta, playing):
+		1:
+			_show_offer_tag()
+		-1:
+			_hide_offer_tag()
+	if offers.current == "" or not offer_tag.visible:
+		catalogue_button.self_modulate = Color.WHITE
+		if offers.current == "" and offer_tag.visible and offer_tag.modulate.a >= 1.0:
+			_hide_offer_tag()   # taken or gone some other way: fade it out
+		return
+	offer_tag.visible = playing or offers.watching
+	_offer_t += delta
+	var r: Dictionary = Balance.AD_REWARDS[offers.current]
+	var title := "%s %s" % [r.icon, r.title]
+	if _offer_title.text != title:
+		_offer_title.text = title
+	var pitch := AdOffers.pitch(offers.current)
+	if _offer_pitch.text != pitch:
+		_offer_pitch.text = pitch
+	var stamp := "Watch ad" if touch_mode else "Press B"
+	if _offer_stamp.text != stamp:
+		_offer_stamp.text = stamp
+	var frac := offers.time_left / Balance.OFFER_LIFETIME
+	_offer_bar.value = frac
+	# Hangs from the button: a swing that settles when it drops in, then a slow
+	# breath so it catches the eye without flashing at you. The header warms up
+	# and the bar goes red in the last few seconds.
+	_offer_swing = move_toward(_offer_swing, 0.0, delta * 0.9)
+	offer_tag.pivot_offset = Vector2(offer_tag.size.x * 0.5, 0.0)
+	offer_tag.rotation = sin(_offer_t * 5.0) * 0.12 * _offer_swing * _offer_swing + sin(_offer_t * 1.3) * 0.012
+	var breath := 0.5 + 0.5 * sin(_offer_t * 3.4)
+	offer_tag.scale = Vector2.ONE * (1.0 + 0.03 * breath)
+	_offer_header.add_theme_color_override("font_color", Color(0.75, 0.24, 0.16).lerp(Color(0.95, 0.45, 0.12), breath))
+	var urgent := offers.time_left < 8.0
+	(_offer_bar.get_theme_stylebox("fill") as StyleBoxTexture).modulate_color = \
+		Color(0.85, 0.3, 0.2) if urgent else Color(1.0, 0.72, 0.3)
+	catalogue_button.self_modulate = Color.WHITE.lerp(Color(1.25, 1.15, 0.95), breath)
+
+
+func _show_offer_tag() -> void:
+	_offer_t = 0.0
+	_offer_swing = 1.0
+	offer_tag.visible = true
+	offer_tag.modulate.a = 0.0
+	var tw := offer_tag.create_tween()
+	tw.set_parallel(true)
+	tw.tween_property(offer_tag, "modulate:a", 1.0, 0.25)
+	offer_tag.offset_top = 40
+	tw.tween_property(offer_tag, "offset_top", 84.0, 0.45).set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_OUT)
+
+
+func _hide_offer_tag() -> void:
+	if not offer_tag.visible:
+		return
+	var tw := offer_tag.create_tween()
+	tw.tween_property(offer_tag, "modulate:a", 0.0, 0.4)
+	tw.tween_callback(func():
+		if offers.current == "":
+			offer_tag.visible = false)
+
+
+func take_offer() -> void:
+	## Tapped the tag (or pressed B): watch the ad for what it's offering.
+	if offers.current == "" or offers.watching or is_blocking():
+		return
+	watch_ad(offers.current)
+
+
+func watch_ad(kind: String) -> void:
+	## Show the rewarded ad for one of Balance.AD_REWARDS and hand out the reward.
+	if Monetization.is_watching():
+		return
+	if not Monetization.is_rewarded_ready(str(Balance.AD_REWARDS[kind].placement)):
+		toast("No ad ready right now. Try again in a bit")
+		return
+	var from_offer := kind == offers.current
+	if from_offer:
+		offers.watching = true
+	player.input_enabled = false
+	touch.release_all()
+	Monetization.watch_for_reward(kind, func(ok: bool, text: String):
+		if from_offer:
+			offers.watching = false
+			if ok:
+				offers.taken()
+				_hide_offer_tag()
+		if not is_blocking():
+			player.input_enabled = true
+		toast(text if ok else "No reward this time")
+		if catalogue_open:
+			_rebuild_catalogue())
 
 
 # =====================================================================================
@@ -639,12 +808,22 @@ func set_shop_info(info: Dictionary) -> void:
 	touch.set_action(action, price if buying else "", can)
 
 
+func toggle_catalogue() -> void:
+	if catalogue_open:
+		close_catalogue()
+	elif not is_blocking():
+		open_catalogue()
+
+
 func open_catalogue() -> void:
-	## The mail-order catalogue on the table by the shed door: the boost, the
+	## The mail-order catalogue: from the button at the top right, or the book
+	## on the table by the shed door. Free bonuses for a short ad, the
 	## purchases, and in playtest builds the developer tools.
 	if catalogue_open:
 		return
 	catalogue_open = true
+	offer_tag.visible = false
+	catalogue_button.visible = false
 	shop_card.visible = false
 	tool_label.visible = true
 	coach_label.visible = false
@@ -722,6 +901,9 @@ func close_catalogue() -> void:
 	if popups.get_child_count() == 0:
 		player.input_enabled = true
 		touch.visible = touch_mode
+		catalogue_button.visible = true
+	if offers.current != "":
+		offer_tag.visible = true
 	GameState.save_game()
 
 
@@ -736,6 +918,13 @@ func _rebuild_catalogue() -> void:
 		r.call()
 
 
+func _section(text: String) -> void:
+	var l := _ink(22, BROWN)
+	l.add_theme_font_override("font", UiTheme.display_font())
+	l.text = text
+	_list_box.add_child(l)
+
+
 func _row(icon: String, title: String, desc: String) -> ShopRow:
 	var row := ShopRow.new()
 	row.setup(icon, title, desc, true)
@@ -744,9 +933,10 @@ func _row(icon: String, title: String, desc: String) -> ShopRow:
 
 
 func _build_catalogue_rows() -> void:
-	var boost := _row("📺", "2x Heat Boost", "Watch an ad: everything melts 2x faster for 5 min. Stacks to 15 min.")
-	boost.set_button("Watch", true)
-	boost.button.pressed.connect(_on_boost_pressed)
+	_section("📺 Free, for watching a short ad")
+	for k in Balance.AD_REWARDS:
+		_ad_row(k)
+	_section("🛒 Shop")
 	for id in Monetization.PRODUCTS:
 		var p: Dictionary = Monetization.PRODUCTS[id]
 		var pid: String = id
@@ -779,7 +969,7 @@ func _build_catalogue_rows() -> void:
 		_list_box.add_child(title)
 		var cash := _row("💰", "Free meltwater", "Adds 10x your current water (at least 1K).")
 		cash.set_button("Add", true)
-		cash.button.pressed.connect(func(): GameState.grant_water(maxf(1000.0, GameState.water * 10.0)))
+		cash.button.pressed.connect(func(): GameState.grant_water(maxf(1000.0, GameState.water * 10.0), false))
 		var speed := _row("⏩", "Melting speed", "Multiplies all melting, for testing.")
 		_row_refreshers.append(func(): speed.set_button("x%d" % int(GameState.debug_speed), true))
 		speed.button.pressed.connect(func():
@@ -794,6 +984,49 @@ func _build_catalogue_rows() -> void:
 		wipe.button.pressed.connect(func():
 			GameState.wipe_save()
 			get_tree().reload_current_scene())
+
+
+func _ad_row(kind: String) -> void:
+	## One free bonus in the catalogue. Whatever the tag is offering right now
+	## is marked as today's special; double water only comes as a special.
+	var r: Dictionary = Balance.AD_REWARDS[kind]
+	var row := _row(str(r.icon), str(r.title), "")
+	row.button.pressed.connect(func(): watch_ad(kind))
+	_row_refreshers.append(func():
+		var special := offers.current == kind
+		var ready := Monetization.is_rewarded_ready(str(r.placement))
+		var desc := ""
+		var label := "Watch ad"
+		var ok := ready
+		match kind:
+			"double_water":
+				desc = "Get your meltwater again: %s" % AdOffers.pitch(kind)
+				if not special:
+					desc = "Comes round now and then: look out for the paper tag under the catalogue button."
+					label = "Not today"
+					ok = false
+			"heat_rush":
+				desc = "Everything melts 2x faster for 5 minutes. Watch again to stack it, up to 15."
+				if GameState.boost_seconds_left() > Balance.BOOST_DURATION * 2.0:
+					label = "Full"
+					ok = false
+			"helper_rush":
+				desc = "Penguins, sauna crew and Kevin all melt 3x as much for 3 minutes."
+				if not GameState.has_helpers():
+					desc = "Hire a helper at the shed first, then make them work 3x as hard for 3 minutes."
+					label = "No crew yet"
+					ok = false
+				elif GameState.is_helper_rush_active():
+					label = Fmt.duration(GameState.helper_rush_seconds_left())
+					ok = false
+		if special:
+			desc = "Special offer, gone in %ds!  " % int(ceil(offers.time_left)) + desc
+		if not ready and ok:
+			label = "No ad yet"
+			ok = false
+		row.set_desc(desc)
+		row.set_button(label, ok and not offers.watching and not Monetization.is_watching())
+		row.set_highlight(special))
 
 
 # =====================================================================================
