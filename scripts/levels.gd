@@ -64,6 +64,19 @@ const VALLEY := {
 				{"z": 60.0, "bow": -2.5, "depth": 3.5, "width": 1.1, "x0": 10.0, "x1": 38.0},
 				{"z": 80.0, "bow": 2.0, "depth": 3.0, "width": 1.0, "x0": -18.0, "x1": 16.0},
 			],
+			# A goblin pirate fleet froze in with the lake (PirateFleet). Each ship's
+			# hull is hollowed out of the ice; its masts poke out of the top. "yaw"
+			# turns the bow (which points to -Z) round; keep it to quarter turns so
+			# the hollow fits the hull. "bounty" is what the crew pays you for
+			# thawing them out.
+			"ships": [
+				{"name": "The Rusty Gob", "mesh": "Galleon", "pos": Vector3(4.0, 0.0, 50.0), "yaw": 0.0,
+					"bounty": 600000.0},
+				{"name": "The Soggy Sock", "mesh": "Sloop", "pos": Vector3(-25.0, 0.0, 61.0), "yaw": 0.0,
+					"bounty": 150000.0},
+				{"name": "The Wet Biscuit", "mesh": "Sloop", "pos": Vector3(27.0, 0.0, 73.0), "yaw": PI,
+					"bounty": 300000.0},
+			],
 		},
 	],
 	# The valley around the glaciers: a flat floor where you can walk, mountains

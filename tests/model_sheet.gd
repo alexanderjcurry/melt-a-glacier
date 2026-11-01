@@ -1,6 +1,7 @@
 extends SceneTree
 ## A contact sheet of every mesh in one models/*.glb, for checking the art:
-##   xvfb-run godot --rendering-driver opengl3 -s res://tests/model_sheet.gd -- finds /tmp/finds.png
+##   xvfb-run godot --rendering-driver opengl3 -s res://tests/model_sheet.gd -- finds /tmp/finds.png [yaw°] [only this mesh]
+## (yaw turns every model round, e.g. 90 to see ships side on)
 ## Each mesh is baked (Models.baked), scaled to about the same size and shown
 ## from the front, a little above, in the game's sunlight.
 
@@ -12,6 +13,7 @@ func _run() -> void:
 	var args := OS.get_cmdline_user_args()
 	var file: String = args[0]
 	var out: String = args[1] if args.size() > 1 else "/tmp/%s.png" % file
+	var yaw := deg_to_rad(float(args[2])) if args.size() > 2 else 0.0
 	var world := Node3D.new()
 	root.add_child(world)
 	var env := Environment.new()
@@ -34,7 +36,7 @@ func _run() -> void:
 	var scn: Node = Models.scene(file).instantiate()
 	var names: Array = []
 	for c in scn.get_children():
-		if c is MeshInstance3D:
+		if c is MeshInstance3D and (args.size() < 4 or c.name == args[3]):
 			names.append(c.name)
 	scn.free()
 	var cols := ceili(sqrt(float(names.size()) * 1.6))
@@ -44,8 +46,9 @@ func _run() -> void:
 		var box := mesh.get_aabb()
 		var s := 1.0 / maxf(box.size.x, maxf(box.size.y, box.size.z))
 		mi.scale = Vector3.ONE * s
+		mi.rotation.y = yaw
 		var cell := Vector3((i % cols) * 1.3, -(i / cols) * 1.3, 0)
-		mi.position = cell - box.get_center() * s
+		mi.position = cell - Basis(Vector3.UP, yaw) * (box.get_center() * s)
 		world.add_child(mi)
 		var l := Label3D.new()
 		l.text = names[i]

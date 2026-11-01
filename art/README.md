@@ -11,6 +11,7 @@ Blender, driven from Python. `pip install bpy` gives Blender as a Python module
     python art/blender/build_village.py      # house_0..4, church, well
     python art/blender/build_penguin.py      # penguin (Body, FlipperL/R, Foot)
     python art/blender/build_shed_props.py   # woodpile, barrel, lantern... round the shed
+    python art/blender/build_pirates.py      # goblin pirate ships and crew frozen in the lake
 
 `kit.py` is the shared modelling kit. It works in Godot coordinates (x right,
 y up, -z forward) and on-screen sRGB colours, so numbers match the GDScript that

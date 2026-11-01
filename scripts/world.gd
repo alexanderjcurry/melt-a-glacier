@@ -40,6 +40,7 @@ var helpers: HelperSwarm
 var hud: Hud
 var shed: Shed
 var solids: Array[AABB] = []
+var fleet: PirateFleet         # the goblin pirate ships frozen in the lake
 
 var _ground_mat: StandardMaterial3D
 var _mountains: MeshInstance3D
@@ -92,6 +93,7 @@ func _ready() -> void:
 	_build_mountains()
 	var carve := _build_village()
 	_build_trees()
+	_build_fleet()
 
 	_build_fence()
 
@@ -104,10 +106,12 @@ func _ready() -> void:
 		field.name = "Glacier%d" % g
 		field.collide = g == stage   # the ones you can't reach yet can't be hit or stood on
 		add_child(field)
-		field.generate(level.glaciers[g], int(level.seed) + 1000 * g, carve if g == 0 else [], g >= stage)
+		var hollows: Array = (carve if g == 0 else []) + fleet.carves.get(g, [])
+		field.generate(level.glaciers[g], int(level.seed) + 1000 * g, hollows, g >= stage)
 		glaciers.append(field)
 	grid = glaciers[0]
 	GameState.grids = glaciers
+	fleet.measure(glaciers)
 	_place_finds()
 	for g in glaciers.size():
 		var field: IceField = glaciers[g]
@@ -119,6 +123,7 @@ func _ready() -> void:
 		field.ice_melted.connect(_on_ice_melted.bind(field))
 		field.find_exposed.connect(_on_find_exposed)
 	GameState.grid = glaciers[stage]
+	fleet.settle(glaciers)
 	GameState.stage_changed.connect(_on_stage_changed)
 	for box in solids:
 		_add_solid_shape(box)
@@ -157,6 +162,9 @@ func _ready() -> void:
 	hud.find_hint = find_hint_at
 	add_child(hud)
 	hud.respawn_requested.connect(respawn)
+	fleet.ship_spotted.connect(func(_n: String): hud.toast("⚓ There's a ship frozen in here!"))
+	fleet.ship_freed.connect(func(n: String, bounty: float):
+		hud.toast("☠️ %s is free! The goblins pay you 💧 %s" % [n, Fmt.num(bounty)]))
 
 	get_window().size_changed.connect(_fit_render_scale)
 	_fit_render_scale()
@@ -1157,6 +1165,16 @@ func _build_village() -> Array:
 	_model("well", Vector3(1.5, 0.0, -19.5))
 	solids.append(AABB(Vector3(0.8, 0, -20.2), Vector3(1.4, 0.9, 1.4)))
 	return carve
+
+
+func _build_fleet() -> void:
+	## The goblin pirate ships frozen in the lake (see PirateFleet). Their hulls
+	## get hollowed out of the ice and you can't walk through them.
+	fleet = PirateFleet.new()
+	fleet.name = "PirateFleet"
+	add_child(fleet)
+	fleet.build(level)
+	solids.append_array(fleet.solids)
 
 
 func _model(file: String, pos: Vector3) -> Node3D:
