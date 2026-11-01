@@ -56,6 +56,7 @@ func setup(icon: String, title: String, desc: String, paper: bool = false) -> vo
 	v.add_child(desc_label)
 
 	button = Button.new()
+	UiTheme.no_keyboard(button)
 	button.custom_minimum_size = Vector2(190, 76)
 	button.size_flags_vertical = Control.SIZE_SHRINK_CENTER
 	button.text = ""

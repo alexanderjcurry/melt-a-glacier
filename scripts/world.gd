@@ -236,6 +236,7 @@ func _unhandled_input(event: InputEvent) -> void:
 			if event.pressed and Input.mouse_mode != Input.MOUSE_MODE_CAPTURED:
 				if not hud.is_blocking():
 					Input.mouse_mode = Input.MOUSE_MODE_CAPTURED
+					get_viewport().gui_release_focus()   # keys belong to the game now
 				return
 			if event.pressed and not _aimed.is_empty() and str(shed.describe(_aimed).action) != "":
 				_mouse_melt = false

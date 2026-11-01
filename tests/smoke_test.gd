@@ -183,6 +183,32 @@ func _run() -> void:
 	for _i in 400:
 		player._move(1.0 / 60.0)
 	check(player.on_floor and player.fuel > 0.99, "landing refills the fuel")
+	# On a computer: once the Respawn button has been clicked, letting go of
+	# Space (jump / fly) must not press it again and send you back to the start.
+	world.hud.set_touch_mode(false)
+	await _frames(1)
+	var rbtn: Button = world.hud.respawn_button
+	player.position = world.SPAWN + Vector3(6.0, 0.0, -6.0)
+	for down in [true, false]:
+		var click := InputEventMouseButton.new()
+		click.button_index = MOUSE_BUTTON_LEFT
+		click.position = rbtn.get_global_rect().get_center()
+		click.global_position = click.position
+		click.pressed = down
+		root.push_input(click, true)
+	await _frames(1)
+	check(player.position.distance_to(world.SPAWN) < 0.6, "clicking the Respawn button with the mouse respawns")
+	player.position = world.SPAWN + Vector3(8.0, 4.0, -8.0)
+	player.velocity = Vector3.ZERO
+	for down in [true, false]:
+		var sp := InputEventKey.new()
+		sp.keycode = KEY_SPACE
+		sp.physical_keycode = KEY_SPACE
+		sp.pressed = down
+		root.push_input(sp)
+	await _frames(1)
+	check(player.position.distance_to(world.SPAWN) > 3.0, "letting go of Space doesn't press the Respawn button (PC)")
+	world.hud.set_touch_mode(true)
 
 	# --- The shed: walk in through the door, look at things and buy them.
 	gs.grant_water(1e6)

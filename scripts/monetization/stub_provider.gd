@@ -71,6 +71,7 @@ func _show_fake_ad(title: String, placement: String, rewarded: bool) -> void:
 	box.add_child(label)
 
 	var btn := Button.new()
+	btn.focus_mode = Control.FOCUS_NONE   # Space (jump) mustn't press it
 	btn.custom_minimum_size = Vector2(360, 90)
 	btn.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
 	btn.disabled = true
@@ -79,6 +80,7 @@ func _show_fake_ad(title: String, placement: String, rewarded: bool) -> void:
 	var skip: Button = null
 	if rewarded:
 		skip = Button.new()
+		skip.focus_mode = Control.FOCUS_NONE
 		skip.text = "Close early (no reward)"
 		skip.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
 		box.add_child(skip)

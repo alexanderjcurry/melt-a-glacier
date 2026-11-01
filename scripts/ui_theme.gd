@@ -65,7 +65,15 @@ static func make_theme() -> Theme:
 	return t
 
 
+static func no_keyboard(b: BaseButton) -> void:
+	## Buttons are for clicks and taps only. A button the mouse clicked keeps
+	## keyboard focus, and Space (jump) or Enter would press it again: letting
+	## go of Space after flying hit "Respawn" and sent you back to the start.
+	b.focus_mode = Control.FOCUS_NONE
+
+
 static func colored_button(b: Button, color: Color, radius: int = 14) -> void:
+	no_keyboard(b)
 	b.add_theme_stylebox_override("normal", flat(color, radius))
 	b.add_theme_stylebox_override("hover", flat(color.lightened(0.1), radius))
 	b.add_theme_stylebox_override("pressed", flat(color.darkened(0.15), radius))
