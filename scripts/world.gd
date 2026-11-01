@@ -40,7 +40,7 @@ var solids: Array[AABB] = []
 
 var _ground_mat: StandardMaterial3D
 var _mountains: MeshInstance3D
-var _grass := Color(0.4, 0.62, 0.28)
+var _grass := Color(0.42, 0.57, 0.3)
 var _moraine := Color(0.55, 0.46, 0.34)
 var _mats := {}
 var _find_markers := {}        # discovery index -> Label3D
@@ -675,22 +675,26 @@ func _build_mountains() -> void:
 
 func _build_village() -> Array:
 	## Builds the frozen village and returns the boxes to carve out of the ice.
+	## The buildings are Blender models (art/blender/build_village.py); house i
+	## is models/house_i.glb, made to fit HOUSES[i]'s footprint.
 	var carve: Array = []
-	for hdef in HOUSES:
+	for i in HOUSES.size():
+		var hdef: Array = HOUSES[i]
 		var x := float(hdef[0])
 		var z := float(hdef[1])
 		var w := float(hdef[2])
 		var d := float(hdef[3])
-		_house(x, z, w, d, HOUSE_WALL, HOUSE_ROOF, hdef[4], hdef[5])
+		_model("house_%d" % i, Vector3(x + w * 0.5, 0.0, z + d * 0.5))
 		var box := AABB(Vector3(x, 0, z), Vector3(w, HOUSE_WALL + HOUSE_ROOF, d))
 		carve.append(box)
 		solids.append(box)
-	# The church, with a steeple tall enough to poke out of the top of the glacier.
+	# The church, with an onion-dome steeple tall enough to poke out of the top
+	# of the glacier. The model's origin is the nave's footprint corner.
 	var cx := float(CHURCH[0])
 	var cz := float(CHURCH[1])
 	var cw := float(CHURCH[2])
 	var cd := float(CHURCH[3])
-	_house(cx, cz, cw, cd, CHURCH_WALL, CHURCH_ROOF, Color(0.93, 0.93, 0.9), Color(0.45, 0.47, 0.55))
+	_model("church", Vector3(cx, 0.0, cz))
 	var nave := AABB(Vector3(cx, 0, cz), Vector3(cw, CHURCH_WALL + CHURCH_ROOF, cd))
 	carve.append(nave)
 	solids.append(nave)
@@ -698,58 +702,21 @@ func _build_village() -> Array:
 	var tz := float(TOWER[1])
 	var tw := float(TOWER[2])
 	var td := float(TOWER[3])
-	var stone := Color(0.86, 0.83, 0.76)
-	_box(Vector3(tw, TOWER_TOP, td), Vector3(tx + tw * 0.5, TOWER_TOP * 0.5, tz + td * 0.5), stone)
-	_box(Vector3(tw + 0.16, 0.25, td + 0.16), Vector3(tx + tw * 0.5, TOWER_TOP - 1.9, tz + td * 0.5), stone.darkened(0.2))
-	_box(Vector3(tw + 0.16, 0.2, td + 0.16), Vector3(tx + tw * 0.5, TOWER_TOP - 0.1, tz + td * 0.5), stone.darkened(0.2))
-	_box(Vector3(0.9, 1.6, 0.06), Vector3(tx + tw * 0.5, 0.8, tz + td + 0.03), Color(0.4, 0.25, 0.15))
-	# Belfry openings on all four sides, and a clock.
-	var dark := Color(0.12, 0.12, 0.16)
-	_box(Vector3(0.7, 1.0, 0.06), Vector3(tx + tw * 0.5, TOWER_TOP - 0.9, tz + td + 0.03), dark)
-	_box(Vector3(0.7, 1.0, 0.06), Vector3(tx + tw * 0.5, TOWER_TOP - 0.9, tz - 0.03), dark)
-	_box(Vector3(0.06, 1.0, 0.7), Vector3(tx - 0.03, TOWER_TOP - 0.9, tz + td * 0.5), dark)
-	_box(Vector3(0.06, 1.0, 0.7), Vector3(tx + tw + 0.03, TOWER_TOP - 0.9, tz + td * 0.5), dark)
-	var clock := CylinderMesh.new()
-	clock.top_radius = 0.42
-	clock.bottom_radius = 0.42
-	clock.height = 0.05
-	var face := _mesh(clock, Vector3(tx + tw * 0.5, TOWER_TOP - 2.8, tz + td + 0.03), Color(0.97, 0.95, 0.85))
-	face.rotation.x = PI / 2.0
-	_box(Vector3(0.05, 0.3, 0.04), Vector3(tx + tw * 0.5, TOWER_TOP - 2.68, tz + td + 0.07), dark)
-	_box(Vector3(0.22, 0.05, 0.04), Vector3(tx + tw * 0.5 + 0.1, TOWER_TOP - 2.8, tz + td + 0.07), dark)
-	var spire := _cone(Vector3(tx + tw * 0.5, TOWER_TOP, tz + td * 0.5), tw * 0.72, SPIRE, Color(0.35, 0.38, 0.5), 4)
-	spire.rotation.y = PI / 4.0
-	_box(Vector3(0.1, 0.7, 0.1), Vector3(tx + tw * 0.5, TOWER_TOP + SPIRE + 0.3, tz + td * 0.5), Color(0.95, 0.8, 0.3))
-	_box(Vector3(0.45, 0.1, 0.1), Vector3(tx + tw * 0.5, TOWER_TOP + SPIRE + 0.4, tz + td * 0.5), Color(0.95, 0.8, 0.3))
 	var tower := AABB(Vector3(tx, 0, tz), Vector3(tw, TOWER_TOP, td))
 	carve.append(tower)
 	solids.append(tower)
 	solids.append(AABB(Vector3(tx + tw * 0.5 - 0.5, TOWER_TOP, tz + td * 0.5 - 0.5), Vector3(1.0, SPIRE * 0.6, 1.0)))
 	# A well in the square.
-	var well := CylinderMesh.new()
-	well.top_radius = 0.7
-	well.bottom_radius = 0.7
-	well.height = 0.9
-	_mesh(well, Vector3(1.5, 0.45, -19.5), Color(0.55, 0.55, 0.58))
+	_model("well", Vector3(1.5, 0.0, -19.5))
 	solids.append(AABB(Vector3(0.8, 0, -20.2), Vector3(1.4, 0.9, 1.4)))
 	return carve
 
 
-func _house(x: float, z: float, w: float, d: float, wall: float, roof: float, wall_col: Color, roof_col: Color) -> void:
-	var cx := x + w * 0.5
-	var cz := z + d * 0.5
-	_box(Vector3(w, wall, d), Vector3(cx, wall * 0.5, cz), wall_col)
-	var pm := PrismMesh.new()
-	pm.size = Vector3(w + 0.3, roof, d + 0.3)
-	_mesh(pm, Vector3(cx, wall + roof * 0.5, cz), roof_col)
-	# Door and windows on the side facing the valley mouth.
-	var front := z + d + 0.03
-	_box(Vector3(0.8, 1.7, 0.06), Vector3(cx, 0.85, front), Color(0.4, 0.25, 0.15))
-	if w >= 3.0:
-		_box(Vector3(0.6, 0.6, 0.06), Vector3(x + 0.6, 1.9, front), Color(0.95, 0.85, 0.45))
-		_box(Vector3(0.6, 0.6, 0.06), Vector3(x + w - 0.6, 1.9, front), Color(0.95, 0.85, 0.45))
-	_box(Vector3(0.06, 0.6, 0.6), Vector3(x - 0.03, 1.9, cz), Color(0.95, 0.85, 0.45))
-	_box(Vector3(0.06, 0.6, 0.6), Vector3(x + w + 0.03, 1.9, cz), Color(0.95, 0.85, 0.45))
+func _model(file: String, pos: Vector3) -> Node3D:
+	var n := Models.instance(file)
+	n.position = pos
+	add_child(n)
+	return n
 
 
 func _build_shed() -> void:
@@ -757,6 +724,12 @@ func _build_shed() -> void:
 	shed = Shed.new()
 	add_child(shed)
 	shed.build(IceField.detail_texture(int(level.seed)))
+	# Woodpile, rain barrel, crates, lantern and stovepipe round the outside
+	# (art/blender/build_shed_props.py, in world coordinates).
+	_model("shed_props", Vector3.ZERO)
+	solids.append(AABB(Vector3(12.4, 0, 15.2), Vector3(2.6, 1.3, 0.75)))   # woodpile
+	solids.append(AABB(Vector3(8.9, 0, 15.4), Vector3(0.7, 0.85, 0.7)))    # barrel
+	solids.append(AABB(Vector3(7.8, 0, 8.5), Vector3(0.75, 1.1, 1.5)))     # crates
 
 
 func _build_trees() -> void:

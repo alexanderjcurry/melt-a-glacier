@@ -166,23 +166,26 @@ func _label(size: int, color: Color = Color.WHITE, outline: int = 6) -> Label:
 
 
 func _build_top() -> void:
-	var left := _panel()
-	left.position = Vector2(16, 14)
+	var left := PanelContainer.new()
+	left.add_theme_stylebox_override("panel", UiTheme.wood_sign())
+	left.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	left.position = Vector2(10, 8)
 	root.add_child(left)
 	var lv := VBoxContainer.new()
 	lv.add_theme_constant_override("separation", 0)
 	left.add_child(lv)
-	water_label = _label(36)
+	water_label = _label(38)
+	UiTheme.outlined(water_label, 38)
 	lv.add_child(water_label)
-	rate_label = _label(18, Color(0.7, 0.88, 1.0))
+	rate_label = _label(17, Color(1.0, 0.88, 0.68), 6)
 	lv.add_child(rate_label)
 
 	respawn_button = Button.new()
 	respawn_button.text = "🏠 Stuck? Respawn"
-	respawn_button.position = Vector2(16, 128)
-	respawn_button.custom_minimum_size = Vector2(220, 50)
-	respawn_button.add_theme_font_size_override("font_size", 20)
-	UiTheme.colored_button(respawn_button, Color(0.22, 0.3, 0.45, 0.85), 12)
+	respawn_button.position = Vector2(14, 132)
+	respawn_button.custom_minimum_size = Vector2(0, 52)
+	respawn_button.add_theme_font_size_override("font_size", 21)
+	UiTheme.colored_button(respawn_button, Color(0.5, 0.62, 0.72))
 	respawn_button.pressed.connect(_on_respawn_pressed)
 	root.add_child(respawn_button)
 
@@ -193,15 +196,15 @@ func _build_top() -> void:
 	mid.offset_top = 16
 	mid.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	root.add_child(mid)
-	ice_label = _label(20)
+	ice_label = _label(21)
+	UiTheme.outlined(ice_label, 21, UiTheme.CREAM, 7)
 	ice_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	mid.add_child(ice_label)
 	ice_bar = ProgressBar.new()
 	ice_bar.show_percentage = false
 	ice_bar.max_value = 1.0
-	ice_bar.custom_minimum_size = Vector2(440, 14)
-	ice_bar.add_theme_stylebox_override("fill", UiTheme.flat(Color(0.55, 0.82, 1.0), 7))
-	ice_bar.add_theme_stylebox_override("background", UiTheme.flat(Color(0.05, 0.1, 0.2, 0.7), 7))
+	ice_bar.custom_minimum_size = Vector2(440, 24)
+	UiTheme.bar_styles(ice_bar, Color(0.62, 0.88, 1.0))
 	ice_bar.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	mid.add_child(ice_bar)
 
@@ -215,11 +218,12 @@ func _build_top() -> void:
 	right.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	root.add_child(right)
 	boost_label = _label(20, Color(1.0, 0.8, 0.4))
+	UiTheme.outlined(boost_label, 21, Color(1.0, 0.8, 0.4), 7)
 	right.add_child(boost_label)
 	boost_button = Button.new()
 	boost_button.text = "📺 2x heat"
-	boost_button.custom_minimum_size = Vector2(150, 56)
-	UiTheme.colored_button(boost_button, Color(0.85, 0.45, 0.15))
+	boost_button.custom_minimum_size = Vector2(150, 60)
+	UiTheme.colored_button(boost_button, Color(0.95, 0.55, 0.2))
 	boost_button.pressed.connect(_on_boost_pressed)
 	right.add_child(boost_button)
 
@@ -234,6 +238,7 @@ func _build_center() -> void:
 	crosshair.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	root.add_child(crosshair)
 	target_label = _label(20)
+	UiTheme.outlined(target_label, 21, UiTheme.CREAM, 7)
 	target_label.set_anchors_and_offsets_preset(Control.PRESET_CENTER)
 	target_label.offset_left = -250
 	target_label.offset_right = 250
@@ -242,6 +247,7 @@ func _build_center() -> void:
 	target_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	root.add_child(target_label)
 	coach_label = _label(26, Color(1.0, 0.93, 0.6), 10)
+	UiTheme.outlined(coach_label, 28, Color(1.0, 0.92, 0.6), 10)
 	coach_label.set_anchors_and_offsets_preset(Control.PRESET_CENTER)
 	coach_label.offset_left = -420
 	coach_label.offset_right = 420
@@ -255,6 +261,7 @@ func _build_center() -> void:
 
 func _build_bottom() -> void:
 	tool_label = _label(22)
+	UiTheme.outlined(tool_label, 24, UiTheme.CREAM, 8)
 	tool_label.set_anchors_and_offsets_preset(Control.PRESET_CENTER_BOTTOM)
 	tool_label.offset_left = -300
 	tool_label.offset_right = 300
@@ -269,10 +276,9 @@ func _build_bottom() -> void:
 	fuel_bar.set_anchors_and_offsets_preset(Control.PRESET_CENTER)
 	fuel_bar.offset_left = -60
 	fuel_bar.offset_right = 60
-	fuel_bar.offset_top = 70
-	fuel_bar.offset_bottom = 78
-	fuel_bar.add_theme_stylebox_override("fill", UiTheme.flat(Color(0.45, 0.9, 1.0), 4))
-	fuel_bar.add_theme_stylebox_override("background", UiTheme.flat(Color(0.05, 0.1, 0.2, 0.6), 4))
+	fuel_bar.offset_top = 66
+	fuel_bar.offset_bottom = 82
+	UiTheme.bar_styles(fuel_bar, Color(0.5, 0.92, 1.0))
 	fuel_bar.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	fuel_bar.visible = false
 	root.add_child(fuel_bar)
@@ -371,12 +377,13 @@ func _refresh() -> void:
 # =====================================================================================
 func toast(text: String) -> void:
 	var p := PanelContainer.new()
-	p.add_theme_stylebox_override("panel", UiTheme.flat(Color(0.03, 0.06, 0.14, 0.85), 14, 12))
+	p.add_theme_stylebox_override("panel", UiTheme.paper(18.0))
 	p.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
 	p.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	var l := Label.new()
 	l.text = text
 	l.add_theme_font_size_override("font_size", 22)
+	l.add_theme_color_override("font_color", INK)
 	p.add_child(l)
 	toast_box.add_child(p)
 	while toast_box.get_child_count() > 2:
@@ -427,7 +434,7 @@ func _ink(size: int, color: Color = INK) -> Label:
 func _build_shop_card() -> void:
 	## A paper price tag at the bottom of the screen: name, what it does, price.
 	shop_card = PanelContainer.new()
-	shop_card.add_theme_stylebox_override("panel", _paper(PAPER, 3, 10, 16))
+	shop_card.add_theme_stylebox_override("panel", UiTheme.paper(20.0))
 	shop_card.anchor_left = 0.5
 	shop_card.anchor_right = 0.5
 	shop_card.anchor_top = 1.0
@@ -448,7 +455,8 @@ func _build_shop_card() -> void:
 	head.add_theme_constant_override("separation", 12)
 	head.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	v.add_child(head)
-	_card_title = _ink(29)
+	_card_title = _ink(30)
+	_card_title.add_theme_font_override("font", UiTheme.display_font())
 	_card_title.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	_card_title.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
 	head.add_child(_card_title)
@@ -457,6 +465,7 @@ func _build_shop_card() -> void:
 	_card_stamp.size_flags_vertical = Control.SIZE_SHRINK_CENTER
 	head.add_child(_card_stamp)
 	_card_price = _ink(26, Color.WHITE)
+	UiTheme.outlined(_card_price, 26, UiTheme.CREAM, 6)
 	_card_stamp.add_child(_card_price)
 	_card_body = _ink(21, INK_SOFT)
 	_card_body.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
@@ -497,7 +506,7 @@ func set_shop_info(info: Dictionary) -> void:
 		stamp = Color(0.66, 0.3, 0.2)
 	elif action == "OWNED" or action == "IN USE" or action == "MAXED":
 		stamp = Color(0.33, 0.5, 0.37)
-	_card_stamp.add_theme_stylebox_override("panel", UiTheme.flat(stamp, 8, 10))
+	_card_stamp.add_theme_stylebox_override("panel", UiTheme.enamel(stamp))
 	var foot := ""
 	if buying and not can:
 		foot = "Not enough 💧 yet"
@@ -684,14 +693,16 @@ func _popup(title: String, body: String) -> Dictionary:
 	dim.add_child(center)
 	var panel := PanelContainer.new()
 	panel.custom_minimum_size = Vector2(620, 0)
-	panel.add_theme_stylebox_override("panel", UiTheme.flat(Color(0.12, 0.18, 0.32), 24, 30))
+	panel.add_theme_stylebox_override("panel", UiTheme.paper(34.0))
 	center.add_child(panel)
 	var v := VBoxContainer.new()
 	v.add_theme_constant_override("separation", 14)
 	panel.add_child(v)
 	var t := Label.new()
 	t.text = title
-	t.add_theme_font_size_override("font_size", 36)
+	t.add_theme_font_override("font", UiTheme.display_font())
+	t.add_theme_font_size_override("font_size", 44)
+	t.add_theme_color_override("font_color", Color(0.75, 0.24, 0.16))
 	t.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	v.add_child(t)
 	var b := Label.new()
@@ -699,6 +710,7 @@ func _popup(title: String, body: String) -> Dictionary:
 	b.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	b.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	b.custom_minimum_size = Vector2(560, 0)
+	b.add_theme_color_override("font_color", INK)
 	v.add_child(b)
 	return {"root": dim, "box": v}
 
@@ -706,7 +718,8 @@ func _popup(title: String, body: String) -> Dictionary:
 func _popup_button(p: Dictionary, text: String, color: Color, cb: Callable) -> Button:
 	var btn := Button.new()
 	btn.text = text
-	btn.custom_minimum_size = Vector2(0, 64)
+	btn.custom_minimum_size = Vector2(0, 66)
+	btn.add_theme_font_size_override("font_size", 28)
 	UiTheme.colored_button(btn, color, 16)
 	btn.pressed.connect(cb)
 	p.box.add_child(btn)
@@ -736,7 +749,7 @@ func show_ending() -> void:
 		Fmt.duration(GameState.play_time), Fmt.num(GameState.melted_cubic_metres()), Fmt.num(GameState.lifetime_water),
 		found, Balance.DISCOVERIES.size()]
 	var p := _popup("☀️ THE END ☀️", body)
-	_popup_button(p, "Walk around the village", Color(0.25, 0.5, 0.85), func(): _close_popup(p))
-	_popup_button(p, "Melt a new glacier", Color(0.85, 0.45, 0.15), func():
+	_popup_button(p, "Walk around the village", Color(0.36, 0.6, 0.86), func(): _close_popup(p))
+	_popup_button(p, "Melt a new glacier", Color(0.95, 0.55, 0.2), func():
 		GameState.wipe_save()
 		get_tree().reload_current_scene())

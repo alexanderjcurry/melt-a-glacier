@@ -30,22 +30,24 @@ static func _mesh_instance(mesh: Mesh, parent: Node3D, pos: Vector3 = Vector3.ZE
 static func penguin(variant: int) -> Node3D:
 	## Children: Body (the rig that rolls and leans), and under it FlipperL,
 	## FlipperR, FootL, FootR (pivots), and Nozzle (where the torch flame comes out).
+	## The model is made in Blender: art/blender/build_penguin.py.
 	var root := Node3D.new()
 	var body := Node3D.new()
 	body.name = "Body"
 	root.add_child(body)
-	_mesh_instance(_penguin_body(variant % SCARVES.size()), body)
+	_model_part(Models.mesh("penguin", "Body"), body, SCARVES[variant % SCARVES.size()])
 	for side in [-1.0, 1.0]:
 		var flipper := Node3D.new()
 		flipper.name = "FlipperL" if side < 0.0 else "FlipperR"
 		flipper.position = Vector3(0.205 * side, 0.52, 0.0)
 		body.add_child(flipper)
-		_mesh_instance(_penguin_flipper(side), flipper)
+		_model_part(Models.mesh("penguin", flipper.name), flipper)
 		var foot := Node3D.new()
 		foot.name = "FootL" if side < 0.0 else "FootR"
 		foot.position = Vector3(0.085 * side, 0.03, -0.04)
+		foot.rotation.y = -0.25 * side   # toes out a little
 		root.add_child(foot)
-		_mesh_instance(_penguin_foot(), foot)
+		_model_part(Models.mesh("penguin", "Foot"), foot)
 	var nozzle := Node3D.new()
 	nozzle.name = "Nozzle"
 	nozzle.position = Vector3(0.13, 0.2, -0.36)
@@ -53,52 +55,23 @@ static func penguin(variant: int) -> Node3D:
 	return root
 
 
-static func _penguin_body(scarf: int) -> ArrayMesh:
-	var key := "penguin_body_%d" % scarf
-	if _cache.has(key):
-		return _cache[key]
-	var st := MeshKit.begin()
-	MeshKit.ellipsoid(st, Vector3(0, 0.34, 0.01), Vector3(0.23, 0.31, 0.21), PENGUIN_BLACK)
-	MeshKit.ellipsoid(st, Vector3(0, 0.31, -0.075), Vector3(0.18, 0.26, 0.15), PENGUIN_WHITE)
-	MeshKit.ellipsoid(st, Vector3(0, 0.66, -0.005), Vector3(0.165, 0.155, 0.16), PENGUIN_BLACK)
-	MeshKit.ellipsoid(st, Vector3(0, 0.645, -0.085), Vector3(0.125, 0.105, 0.09), PENGUIN_WHITE)
-	for side in [-1.0, 1.0]:
-		MeshKit.ellipsoid(st, Vector3(0.056 * side, 0.678, -0.158), Vector3(0.027, 0.03, 0.02), Color(0.03, 0.03, 0.05), Basis.IDENTITY, 6, 10)
-		MeshKit.ellipsoid(st, Vector3(0.05 * side, 0.69, -0.176), Vector3(0.009, 0.009, 0.006), Color.WHITE, Basis.IDENTITY, 4, 6)
-		MeshKit.ellipsoid(st, Vector3(0.092 * side, 0.625, -0.135), Vector3(0.03, 0.018, 0.012), Color(1.0, 0.6, 0.65), Basis.IDENTITY, 4, 8)
-	MeshKit.cylinder(st, Vector3(0, 0.64, -0.15), Vector3(0, 0.625, -0.28), 0.042, 0.0, BEAK, 10)
-	# Scarf: a band round the neck and a tail hanging down the front.
-	var sc: Color = SCARVES[scarf]
-	MeshKit.cylinder(st, Vector3(0, 0.5, 0.0), Vector3(0, 0.565, 0.0), 0.178, 0.17, sc, 16)
-	MeshKit.box(st, Vector3(0.09, 0.44, -0.165), Vector3(0.07, 0.15, 0.03), sc.darkened(0.1), Basis(Vector3.FORWARD, 0.15))
-	# The tiny torch, held out in front: a red gas can with a brass nozzle.
-	MeshKit.cylinder(st, Vector3(0.13, 0.3, -0.2), Vector3(0.13, 0.25, -0.3), 0.04, 0.04, Color(0.85, 0.15, 0.12), 10)
-	MeshKit.cylinder(st, Vector3(0.13, 0.25, -0.3), Vector3(0.13, 0.205, -0.36), 0.016, 0.01, Color(0.85, 0.7, 0.3), 8)
-	var mesh := MeshKit.finish(st)
-	_cache[key] = mesh
-	return mesh
-
-
-static func _penguin_flipper(side: float) -> ArrayMesh:
-	var key := "penguin_flipper_%d" % int(side)
-	if _cache.has(key):
-		return _cache[key]
-	var st := MeshKit.begin()
-	MeshKit.ellipsoid(st, Vector3(0.03 * side, -0.15, 0.0), Vector3(0.032, 0.16, 0.085), PENGUIN_BLACK,
-		Basis(Vector3.BACK, 0.22 * side), 6, 10)
-	var mesh := MeshKit.finish(st)
-	_cache[key] = mesh
-	return mesh
-
-
-static func _penguin_foot() -> ArrayMesh:
-	if _cache.has("penguin_foot"):
-		return _cache["penguin_foot"]
-	var st := MeshKit.begin()
-	MeshKit.ellipsoid(st, Vector3(0, 0.0, -0.04), Vector3(0.065, 0.028, 0.1), BEAK, Basis.IDENTITY, 5, 10)
-	var mesh := MeshKit.finish(st)
-	_cache["penguin_foot"] = mesh
-	return mesh
+static func _model_part(mesh: Mesh, parent: Node3D, scarf: Variant = null) -> MeshInstance3D:
+	## A part of a Blender model. The surface whose material is called "scarf"
+	## gets the given colour.
+	var mi := MeshInstance3D.new()
+	mi.mesh = mesh
+	if scarf != null:
+		for i in mesh.get_surface_count():
+			var m := mesh.surface_get_material(i)
+			if m != null and m.resource_name.begins_with("scarf") and not m.resource_name.contains("fringe"):
+				var key := "scarf_mat_%s" % (scarf as Color).to_html()
+				if not _cache.has(key):
+					var sm := (m as StandardMaterial3D).duplicate() as StandardMaterial3D
+					sm.albedo_color = scarf
+					_cache[key] = sm
+				mi.set_surface_override_material(i, _cache[key])
+	parent.add_child(mi)
+	return mi
 
 
 # =====================================================================================
