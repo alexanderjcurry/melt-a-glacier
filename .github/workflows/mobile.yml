@@ -149,8 +149,12 @@ jobs:
             --export-release "Android" build/android/melt-a-glacier.aab
           test -s build/android/melt-a-glacier.aab
           ls -la build/android
-          # Show that the ad and store libraries made it in.
-          unzip -l build/android/melt-a-glacier.aab | grep -ciE "admob|revenuecat|gms/ads" || true
+          # The ad and store SDKs must be inside, with the AdMob app id in the manifest.
+          unzip -o -q build/android/melt-a-glacier.aab 'base/dex/*' 'base/manifest/*' -d /tmp/aab
+          for sdk in com/revenuecat/purchases com/google/android/libraries/ads/mobile/sdk com/poingstudios; do
+            if grep -rqa "$sdk" /tmp/aab/base/dex; then echo "found $sdk"; else echo "::error::$sdk missing from the bundle"; exit 1; fi
+          done
+          grep -qa "APPLICATION_ID" /tmp/aab/base/manifest/AndroidManifest.xml && echo "AdMob app id meta-data present"
 
       - name: Export iOS Xcode project (checks the iOS plugins and settings)
         run: |
@@ -164,6 +168,8 @@ jobs:
           grep -q GADApplicationIdentifier "$plist"
           grep -q SKAdNetworkItems "$plist"
           grep -q NSUserTrackingUsageDescription "$plist"
+          grep -q GodotxRevenueCat build/ios/MeltAGlacier.xcodeproj/project.pbxproj && echo "RevenueCat linked"
+          grep -q -i admob build/ios/MeltAGlacier.xcodeproj/project.pbxproj && echo "AdMob linked"
           ls build/ios
 
       - name: Upload the App Bundle
