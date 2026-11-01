@@ -12,6 +12,10 @@ extends Control
 ## Each finger is tracked by its own index and its motion is worked out from its
 ## own last position. (On the web, a drag event's `relative` can be measured
 ## against another finger when several are down, which spun the camera.)
+##
+## Finger indexes are whatever the browser or OS hands out. iPhone Safari gives
+## big numbers that can be negative (-1525662976), so "no finger" is NONE, a
+## value no real index can have, never -1.
 
 const STICK_RADIUS := 85.0
 const STICK_DEAD := 0.12            # inner part of the stick that does nothing
@@ -21,6 +25,7 @@ const JUMP_RADIUS := 60.0
 const LOOK_DEAD_PX := 8.0           # a look finger has to move this far before the view turns
 const MELT_LOOK_DEAD_PX := 24.0     # more slack while a thumb rests on the melt button
 const GLITCH_PX := 220.0            # a jump this big between two events is not a real swipe
+const NONE := -281474976710656      # "no finger": outside the 32-bit range touch ids come from
 
 var move_vector := Vector2.ZERO
 var melting := false
@@ -33,12 +38,12 @@ var action_text := ""                 # set: the melt button is a shop button wi
 var action_sub := ""                  # a smaller line under it (the price)
 var action_ok := false                # green when pressing it does something
 
-var _stick_finger := -1
+var _stick_finger := NONE
 var _stick_origin := Vector2.ZERO
 var _stick_pos := Vector2.ZERO
-var _look_finger := -1
-var _melt_finger := -1
-var _jump_finger := -1
+var _look_finger := NONE
+var _melt_finger := NONE
+var _jump_finger := NONE
 var _jump_queued := false
 var _action_queued := false
 var _last := {}                       # finger index -> last position
@@ -48,6 +53,14 @@ var _travel := {}                     # finger index -> distance moved since it 
 func _ready() -> void:
 	set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_watch_browser_touches()
+
+
+func _notification(what: int) -> void:
+	# Fingers lifted while the game is in the background never send a lift-off.
+	if what == NOTIFICATION_APPLICATION_FOCUS_OUT or what == NOTIFICATION_APPLICATION_PAUSED \
+			or what == NOTIFICATION_WM_WINDOW_FOCUS_OUT:
+		release_all()
 
 
 func melt_center() -> Vector2:
@@ -90,10 +103,10 @@ func take_action() -> bool:
 
 
 func release_all() -> void:
-	_stick_finger = -1
-	_look_finger = -1
-	_melt_finger = -1
-	_jump_finger = -1
+	_stick_finger = NONE
+	_look_finger = NONE
+	_melt_finger = NONE
+	_jump_finger = NONE
 	_last.clear()
 	_travel.clear()
 	move_vector = Vector2.ZERO
@@ -137,6 +150,7 @@ func _on_touch(event: InputEventScreenTouch) -> void:
 	if not event.pressed or event.canceled:
 		queue_redraw()
 		return
+	_drop_lost_fingers(i)
 	var b := _button_at(pos)
 	if not b.is_empty():
 		_flash(b.control)
@@ -175,21 +189,61 @@ func _on_touch(event: InputEventScreenTouch) -> void:
 
 
 func _release(i: int) -> void:
-	if i < 0:
+	if i == NONE:
 		return
 	_last.erase(i)
 	_travel.erase(i)
 	if i == _melt_finger:
-		_melt_finger = -1
+		_melt_finger = NONE
 		melting = false
 	if i == _jump_finger:
-		_jump_finger = -1
+		_jump_finger = NONE
 		jump_held = false
 	if i == _stick_finger:
-		_stick_finger = -1
+		_stick_finger = NONE
 		move_vector = Vector2.ZERO
 	if i == _look_finger:
-		_look_finger = -1
+		_look_finger = NONE
+
+
+# --- In the browser: ask the page which fingers are really still down -------------
+# Godot only hears about the fingers that changed. If a lift-off gets lost, the
+# page's own list of touches (kept up to date by a little listener) still knows,
+# so every new touch lets go of fingers that aren't on the glass any more.
+const _JS_WATCH := """(function () {
+	if (window.__meltTouchWatch) return;
+	window.__meltTouchWatch = true;
+	window.__meltTouchIds = '';
+	var update = function (e) {
+		var ids = [];
+		for (var k = 0; k < e.touches.length; k++) ids.push(e.touches[k].identifier | 0);
+		window.__meltTouchIds = ids.join(',');
+	};
+	['touchstart', 'touchmove', 'touchend', 'touchcancel'].forEach(function (t) {
+		window.addEventListener(t, update, { capture: true, passive: true });
+	});
+})();"""
+var _browser_watch := false
+
+
+func _watch_browser_touches() -> void:
+	if OS.has_feature("web") and ClassDB.class_exists("JavaScriptBridge"):
+		JavaScriptBridge.eval(_JS_WATCH, true)
+		_browser_watch = true
+
+
+func _drop_lost_fingers(new_finger: int) -> void:
+	if not _browser_watch:
+		return
+	var ids = JavaScriptBridge.eval("window.__meltTouchIds", true)
+	if typeof(ids) != TYPE_STRING:
+		return
+	var down := {}
+	for part in (ids as String).split(",", false):
+		down[int(part)] = true
+	for f in [_melt_finger, _jump_finger, _stick_finger, _look_finger]:
+		if f != NONE and f != new_finger and not down.has(f):
+			_release(f)
 
 
 func _on_drag(event: InputEventScreenDrag) -> void:
@@ -235,13 +289,13 @@ func _flash(c: Control) -> void:
 func _draw() -> void:
 	var font := get_theme_default_font()
 	# Joystick
-	var base := _stick_origin if _stick_finger != -1 else stick_home()
-	var knob := _stick_pos if _stick_finger != -1 else base
-	var a := 0.55 if _stick_finger != -1 else 0.28
+	var base := _stick_origin if _stick_finger != NONE else stick_home()
+	var knob := _stick_pos if _stick_finger != NONE else base
+	var a := 0.55 if _stick_finger != NONE else 0.28
 	draw_circle(base, STICK_RADIUS, Color(1, 1, 1, a * 0.35))
 	draw_arc(base, STICK_RADIUS, 0, TAU, 48, Color(1, 1, 1, a), 3.0)
 	draw_circle(knob, 34.0, Color(1, 1, 1, a + 0.15))
-	if _stick_finger == -1:
+	if _stick_finger == NONE:
 		_label(font, "MOVE", base + Vector2(0, STICK_RADIUS + 26), 20, Color(1, 1, 1, 0.55))
 	# Melt button (or the shop button in the shed)
 	var mc := melt_center()
@@ -261,7 +315,7 @@ func _draw() -> void:
 		_label(font, "HOLD TO MELT", mc + Vector2(0, 46), 19, Color.WHITE)
 	# Jump / jetpack button, with the fuel gauge around it
 	var jc := jump_center()
-	draw_circle(jc, JUMP_RADIUS, Color(0.3, 0.55, 0.9, 0.75 if _jump_finger != -1 else 0.5))
+	draw_circle(jc, JUMP_RADIUS, Color(0.3, 0.55, 0.9, 0.75 if _jump_finger != NONE else 0.5))
 	draw_arc(jc, JUMP_RADIUS, 0, TAU, 40, Color(1, 1, 1, 0.8), 3.0)
 	if fuel < 0.999:
 		draw_arc(jc, JUMP_RADIUS + 9.0, 0, TAU, 48, Color(0, 0, 0, 0.35), 7.0)

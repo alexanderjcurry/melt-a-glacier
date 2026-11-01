@@ -142,6 +142,26 @@ func _run() -> void:
 	_touch(5, Vector2(touch.size.x * 0.7, 250), true)
 	check(not touch.melting, "a reused finger index lets go of the melt button")
 	touch.release_all()
+	# iPhone Safari hands out big finger ids that can be negative. Letting go of
+	# one has to let go (it used to leave the heat on and the stick walking).
+	_touch(-1525662976, touch.melt_center(), true)
+	_touch(-1525662977, Vector2(200, touch.size.y - 160), true)
+	_drag(-1525662977, Vector2(200, touch.size.y - 240), Vector2(0, -80))
+	check(touch.melting and touch.move_vector.y > 0.5, "negative finger ids (iPhone Safari) melt and walk")
+	_touch(-1525662976, touch.melt_center(), false)
+	_touch(-1525662977, Vector2(200, touch.size.y - 240), false)
+	check(not touch.melting and touch.move_vector == Vector2.ZERO, "letting go of negative finger ids stops both")
+	_touch(2147483000, touch.melt_center(), true)
+	_touch(2147483000, touch.melt_center(), false)
+	_touch(-1, Vector2(200, touch.size.y - 160), true)
+	_drag(-1, Vector2(200, touch.size.y - 240), Vector2(0, -80))
+	_touch(-1, Vector2(200, touch.size.y - 240), false)
+	check(not touch.melting and touch.move_vector == Vector2.ZERO, "huge and -1 finger ids let go too")
+	# Leaving the app (or the browser tab) with a thumb down lets go of it.
+	_touch(8, touch.melt_center(), true)
+	touch.notification(Node.NOTIFICATION_APPLICATION_FOCUS_OUT)
+	check(not touch.melting, "switching away lets go of the melt button")
+	touch.release_all()
 	# Respawn button works with a thumb already on the stick.
 	player.position = Vector3(3.0, 0.0, 6.0)
 	_touch(6, Vector2(150, touch.size.y - 150), true)
