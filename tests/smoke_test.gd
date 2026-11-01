@@ -594,9 +594,9 @@ func _ad_offers(gs, hud, player) -> void:
 	await _frames(2)
 	check(offers.current != "" and hud.offer_tag.visible, "an ad offer tag drops in (%s)" % offers.current)
 	# Let it run out: the next one waits longer.
-	offers.time_left = 0.01
-	await _frames(2)
-	check(offers.current == "" and offers._wait > 200.0, "ignored, it goes away and the next one waits longer (%ds)" % int(offers._wait))
+	offers.time_left = 0.0
+	var gone: int = offers.update(0.1, true)
+	check(gone == -1 and offers.current == "" and offers._wait > 200.0, "ignored, it goes away and the next one waits longer (%ds)" % int(offers._wait))
 	# Double water: pays your water again, capped by recent income.
 	gs.water = 1000.0
 	var amount: float = gs.double_water_amount()
