@@ -1,11 +1,11 @@
 # A Game About Melting A Glacier (prototype)
 
 A first-person, landscape incremental game made in **Godot 4.4**. You walk around
-a valley that's buried under a glacier, aim a hair dryer at the ice and melt it
-block by block. Meltwater is money: spend it at the shed on hotter tools,
+a valley that's buried under a glacier, aim a hair dryer at the ice and slowly
+dig into it. Meltwater is money: spend it at the shed on hotter tools,
 upgrades and helpers (penguins with tiny torches, a sauna crew, an adopted
 volcano called Kevin). Frozen junk melts out as you dig, and at the very bottom
-there's a whole village. Melt the last block and summer comes back.
+there's a whole village. Melt the last of it and summer comes back.
 
 ## Play it on your phone (iPhone or Android)
 
@@ -20,7 +20,8 @@ and launch it from the new icon. Progress is saved in the browser.
 | Left thumb: drag anywhere on the left side to walk | WASD or arrow keys |
 | Right thumb: drag to look around | Click once, then move the mouse |
 | Hold the 🔥 button to melt (you can drag from it to aim) | Hold the left mouse button |
-| JUMP button (also climbs 2-block ledges) | Space |
+| JUMP button; hold it to fly with the jetpack | Space (hold to fly) |
+| 🏠 Stuck? Respawn button (top left) | R |
 | "Enter the shed" button appears at the shed door | E at the shed door, Esc to leave |
 
 Every push to `main` rebuilds and republishes this link automatically
@@ -63,12 +64,14 @@ iOS comes later through Codemagic (Godot workflow). Nothing in the code is Andro
 
 | Feature | Where |
 |---|---|
-| The glacier: ~4,600 one-metre ice blocks in 8 layers by depth (Fresh Snow 1 hp down to The Last Chunk 128 hp). Deeper ice is harder and worth more. Drawn with one MultiMesh | `scripts/ice_grid.gd`, `Balance.LAYERS` |
-| First-person walking with voxel collision, auto step-up, jumping and ledge climbing (no physics engine) | `scripts/player.gd` |
+| The glacier: smooth, diggable ice (about 4,900 m³) stored as a density field on a 0.5 m grid and re-meshed in 8x8 chunks as you melt it (surface nets). 8 layers by depth, from Fresh Snow to The Last Chunk: deeper ice is harder and worth more. Crevasses, snow cover, blue carved ice and a wet glow where the heat lands are drawn by `shaders/ice.gdshader` | `scripts/ice_field.gd`, `Balance.LAYERS` |
+| The level: the glacier's shape, its crevasses and the valley around it are one dictionary, so more levels are more dictionaries | `scripts/levels.gd` |
+| First-person walking (CharacterBody3D on the ice's collision mesh), step-up, a jetpack (hold JUMP, fuel refills on landing) and a respawn button | `scripts/player.gd` |
+| The valley: generated mountains with rock and snow, a cloudy sky, the lake and a meltwater stream, pine forest, boulders | `scripts/scenery.gd`, `shaders/` |
 | The heat tool: aim with the crosshair, hold to melt a ball of ice, flame and steam effects | `Player._update_tool()` |
 | 6 tools bought in order at the shed: Hair Dryer, Heat Lamp, Blowtorch, Flamethrower, Lava Hose, Orbital Mirror | `Balance.TOOLS` |
 | 5 upgrades: Heat Output, Wider Nozzle, Longer Reach, Steam Sell, Crampon Boots | `Balance.UPGRADES` |
-| Helpers: penguins and the sauna crew walk on the ice melting it, Kevin the volcano lobs lava bombs | `scripts/helpers.gd`, `Balance.HELPERS` |
+| Helpers (3D models built in code): penguins with tiny torches and the sauna crew walk on the ice melting it, Kevin the volcano lobs lava bombs and watches you | `scripts/helpers.gd`, `scripts/creatures.gd`, `Balance.HELPERS` |
 | 11 buried finds frozen at fixed depths (mitten, snowmobile, mammoth, 1970s caveman, dinosaur egg...). They melt out, sell for a burst of water, and stay in the world | `World._place_finds()`, `Balance.DISCOVERIES` |
 | A village frozen inside the glacier. The church spire pokes out of the top as a hint | `World._build_village()` |
 | The valley greens up and flowers bloom where the ice is gone; villagers come out at the end | `World._update_slow()` |
@@ -90,9 +93,13 @@ export_presets.cfg       Web (playtest) and Android export presets
 scenes/world.tscn        the only scene; everything is built in code
 scripts/balance.gd       ALL tunable numbers: layers, tools, upgrades, helpers, finds, ad rules
 scripts/game_state.gd    autoload: economy, shed purchases, offline, save/load
-scripts/world.gd         builds the valley (sky, mountains, village, shed) and wires everything up
-scripts/ice_grid.gd      the glacier: block data, melting, raycasts, collision, save string
-scripts/player.gd        first-person movement, collision, the heat tool
+scripts/levels.gd        level descriptions: glacier shape, crevasses, valley, stream
+scripts/world.gd         builds the valley (village, shed, finds) and wires everything up
+scripts/scenery.gd       mountains, sky, lake, stream, forest, boulders
+scripts/ice_field.gd     the glacier: density field, meshing, melting, collision, save string
+scripts/player.gd        first-person movement, jetpack, respawn, the heat tool
+scripts/creatures.gd     3D models of the helpers (penguin, sauna crew, Kevin)
+scripts/mesh_kit.gd      tiny modelling kit (ellipsoids, cylinders, boxes) for those models
 scripts/touch_controls.gd  phone controls (multi-touch stick, look, melt, jump)
 scripts/helpers.gd       penguins, sauna crew, Kevin the volcano
 scripts/hud.gd           HUD, shed menu, toasts, popups, ending
@@ -100,18 +107,21 @@ scripts/ui_theme.gd      shared UI look, emoji font, particle texture
 scripts/shop_row.gd      one shop list row
 scripts/fmt.gd           1.23K / 4.5M number formatting
 scripts/monetization/    ad + IAP interface, stub provider, autoload facade
+shaders/                 ice, mountain rock and snow, sky, water
 fonts/                   subset Noto Color Emoji (the placeholder art) + license
 tests/smoke_test.gd      headless test: godot --headless -s res://tests/smoke_test.gd
 tests/screenshots.gd     renders screenshots of key moments (see the top of the file)
+tests/field_bench.gd     timing benchmark for the ice (build, re-mesh, melt rate)
 tools/subset_emoji.sh    rebuild the emoji font if you add new emoji
 ```
 
 ## Tuning the pacing
 
-Every number lives in `scripts/balance.gd`. The whole glacier is about 81,000 hp,
-and a block pays out its hp in meltwater (times the Steam Sell upgrade). To make
-the game longer, raise the deeper `LAYERS` hp values (and the tool costs with
-them). The first playtests will tell us how long a run really takes.
+Every number lives in `scripts/balance.gd`. The glacier holds about 4,900 m³ of
+ice. Each layer has an hp per cubic metre, and melting a cubic metre pays out that
+hp in meltwater (times the Steam Sell upgrade). To make the game longer, raise the
+deeper `LAYERS` hp values (and the tool costs with them). The first playtests
+will tell us how long a run really takes.
 
 ## Adding real ads and purchases later
 
@@ -127,8 +137,14 @@ No game code changes beyond that.
 
 ## Placeholder art
 
-Everything is simple shapes built in code (boxes, cones, prisms), and the
-characters and finds are emoji drawn as 3D labels, from a bundled Noto Color
-Emoji subset (Apache 2.0 / OFL, see `fonts/`). If you add a new emoji to the
-code, re-run `tools/subset_emoji.sh`, or it shows as a box. Real models can
-replace the shapes one at a time (the shed, the houses, the helpers).
+Everything is built in code. The helpers are low-poly 3D models made of simple
+shapes (`scripts/creatures.gd`); the mountains, lake and forest are generated
+(`scripts/scenery.gd`). The finds and villagers are still emoji drawn as 3D
+labels, from a bundled Noto Color Emoji subset (Apache 2.0 / OFL, see `fonts/`).
+If you add a new emoji to the code, re-run `tools/subset_emoji.sh`, or it shows
+as a box. Real models can replace the shapes one at a time (the shed, the houses,
+the helpers).
+
+A note for shader work: the Compatibility renderer lights colours as they are
+(a custom shader's `ALBEDO = vec3(0.5)` looks the same as a StandardMaterial3D
+with `albedo_color` 0.5), so don't convert colours to linear in shaders.

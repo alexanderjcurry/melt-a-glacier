@@ -1,20 +1,25 @@
 class_name HelperSwarm
 extends Node3D
-## Helpers you buy at the shed. Penguins and the sauna crew walk around on the
-## ice melting whatever is under them. The adopted volcano lobs lava bombs.
+## Helpers you buy at the shed. Penguins and the sauna crew waddle around on
+## top of the ice melting the spot in front of them. Kevin the adopted
+## volcano lobs lava bombs (and keeps an eye on you).
 
 const WALKER_TYPES := [0, 1]           # indices into Balance.HELPERS that walk
 const VOLCANO_TYPE := 2
 const VOLCANO_POS := Vector3(-27.0, 13.0, -38.0)
-const WALK_SPEED := 1.6
+const WALK_SPEED := [1.4, 1.1]         # per walker type
+const MELT_RADIUS := [0.7, 1.0]
+const MELT_TIME := 4.5                 # seconds at one spot before moving on
 
-var grid: IceGrid
-var _walkers: Array = []               # {type, node, pos, target (Vector3i), wobble}
+var grid: IceField
+var player: Node3D                     # Kevin watches you
+var _walkers: Array = []               # {type, node, body, pos, target, t, timer, melting, fx}
 var _bombs: Array = []                 # {node, from, to, t, dur, damage}
 var _bomb_timer := 0.0
 var _rng := RandomNumberGenerator.new()
 var _volcano: Node3D
 var _smoke: CPUParticles3D
+var _spawned := 0
 
 
 func _ready() -> void:
@@ -52,32 +57,47 @@ func _sync_walkers() -> void:
 
 
 func _spawn_walker(t: int) -> void:
-	var label := Label3D.new()
-	label.text = Balance.HELPERS[t].icon
-	label.font_size = 96
-	label.pixel_size = 0.009
-	label.billboard = BaseMaterial3D.BILLBOARD_FIXED_Y
-	label.alpha_cut = Label3D.ALPHA_CUT_DISCARD
-	label.outline_size = 0
-	add_child(label)
-	var c := grid.random_surface_cell(_rng)
-	var pos := grid.cell_center(c) + Vector3(0, 0.5, 0) if c.y >= 0 else Vector3(0, 0, 8)
-	_walkers.append({"type": t, "node": label, "pos": pos, "target": c, "wobble": _rng.randf() * TAU,
-		"torch": _make_torch(label)})
+	_spawned += 1
+	var node: Node3D = Creatures.penguin(_spawned) if t == 0 else Creatures.sauna(_spawned)
+	var s := _rng.randf_range(0.92, 1.08)
+	node.scale = Vector3(s, s, s)
+	add_child(node)
+	var body: Node3D = node.get_node("Body")
+	var fx: CPUParticles3D
+	if t == 0:
+		fx = _make_fx(Color(1.0, 0.7, 0.2, 0.95), Color(1.0, 0.95, 0.9, 0.0), 0.1, 14, 0.35)
+		fx.direction = Vector3(0, -0.6, -1)
+		fx.initial_velocity_min = 1.2
+		fx.initial_velocity_max = 2.0
+		fx.gravity = Vector3(0, 1.5, 0)
+		body.get_node("Nozzle").add_child(fx)
+	else:
+		fx = _make_fx(Color(1, 1, 1, 0.65), Color(1, 1, 1, 0.0), 0.32, 18, 1.4)
+		fx.direction = Vector3(0, 1, 0)
+		fx.spread = 25.0
+		fx.initial_velocity_min = 0.5
+		fx.initial_velocity_max = 1.1
+		fx.gravity = Vector3(0, 0.8, 0)
+		body.get_node("Bucket").add_child(fx)
+	var p := grid.random_surface_point(_rng)
+	if p == Vector3.INF:
+		p = Vector3(_rng.randf_range(-8.0, 8.0), 0.0, 8.0)
+	p.y = grid.surface_y(p.x, p.z)   # the same smoothed surface they walk on
+	node.position = p
+	node.rotation.y = _rng.randf() * TAU
+	_walkers.append({"type": t, "node": node, "body": body, "pos": p, "target": Vector3.INF,
+		"t": _rng.randf() * TAU, "timer": 0.0, "melting": false, "fx": fx})
 
 
-func _make_torch(parent: Node3D) -> CPUParticles3D:
+func _make_fx(c0: Color, c1: Color, size: float, amount: int, life: float) -> CPUParticles3D:
 	var p := CPUParticles3D.new()
-	p.amount = 10
-	p.lifetime = 0.5
+	p.amount = amount
+	p.lifetime = life
 	p.emitting = false
-	p.direction = Vector3(0, -1, 0)
-	p.spread = 25.0
-	p.gravity = Vector3(0, 1.5, 0)
-	p.initial_velocity_min = 0.6
-	p.initial_velocity_max = 1.2
+	p.spread = 18.0
+	p.local_coords = false
 	var quad := QuadMesh.new()
-	quad.size = Vector2(0.12, 0.12)
+	quad.size = Vector2(size, size)
 	var mat := StandardMaterial3D.new()
 	mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
 	mat.billboard_mode = BaseMaterial3D.BILLBOARD_PARTICLES
@@ -88,52 +108,83 @@ func _make_torch(parent: Node3D) -> CPUParticles3D:
 	quad.material = mat
 	p.mesh = quad
 	var ramp := Gradient.new()
-	ramp.set_color(0, Color(1.0, 0.7, 0.2, 0.9))
-	ramp.set_color(1, Color(1.0, 1.0, 1.0, 0.0))
+	ramp.set_color(0, c0)
+	ramp.set_color(1, c1)
 	p.color_ramp = ramp
-	p.position = Vector3(0.0, -0.3, 0.0)
-	parent.add_child(p)
+	p.scale_amount_min = 0.7
+	p.scale_amount_max = 1.3
 	return p
 
 
 func _update_walker(w: Dictionary, delta: float) -> void:
 	var t: int = w.type
+	var node: Node3D = w.node
+	var fx: CPUParticles3D = w.fx
+	var pos: Vector3 = w.pos
+	if GameState.has_won or grid.remaining <= 0:
+		# Party time: hop up and down wherever they are.
+		fx.emitting = false
+		w.t += delta * 7.0
+		pos.y = lerpf(pos.y, grid.surface_y(pos.x, pos.z), minf(1.0, delta * 8.0))
+		w.pos = pos
+		node.position = pos + Vector3(0, absf(sin(w.t)) * 0.35, 0)
+		_pose(w, 1.0, 0.0, true)
+		return
 	var count := int(GameState.helper_counts[t])
 	var shown := maxi(mini(count, Balance.MAX_VISIBLE_WALKERS), 1)
 	var power := GameState.helper_power(t) / float(shown)   # each visible walker carries a share
-	var node: Label3D = w.node
-	var torch: CPUParticles3D = w.torch
-	if GameState.has_won or grid.remaining <= 0:
-		torch.emitting = false
-		w.wobble += delta * 6.0
-		var p: Vector3 = w.pos
-		p.y = lerpf(p.y, grid.surface_height_at(p), minf(1.0, delta * 8.0))
-		w.pos = p
-		node.position = p + Vector3(0, 0.6 + absf(sin(w.wobble)) * 0.5, 0)   # celebrate
-		return
-	var tgt: Vector3i = w.target
-	if tgt.y < 0 or grid.column_top_y(tgt.x, tgt.z) < 0:
-		tgt = grid.nearby_surface_cell(grid.world_to_cell(w.pos), _rng)
+	var tgt: Vector3 = w.target
+	if tgt == Vector3.INF or not grid.has_ice_at(tgt.x, tgt.z):
+		tgt = grid.nearby_surface_point(pos, _rng, 4.0)
 		w.target = tgt
-		if tgt.y < 0:
+		w.timer = 0.0
+		if tgt == Vector3.INF:
+			fx.emitting = false
 			return
-	var top := grid.column_top_y(tgt.x, tgt.z)
-	var dest := grid.cell_center(Vector3i(tgt.x, top, tgt.z)) + Vector3(0, 0.5, 0)
-	var pos: Vector3 = w.pos
-	var flat := Vector3(dest.x - pos.x, 0.0, dest.z - pos.z)
-	if flat.length() > 0.2:
-		var step := flat.normalized() * minf(WALK_SPEED * delta, flat.length())
-		pos += step
-		torch.emitting = false
-		w.wobble += delta * 10.0
+	var flat := Vector3(tgt.x - pos.x, 0.0, tgt.z - pos.z)
+	var walking := flat.length() > 0.3
+	if walking:
+		pos += flat.normalized() * minf(float(WALK_SPEED[t]) * delta, flat.length())
+		node.rotation.y = lerp_angle(node.rotation.y, atan2(-flat.x, -flat.z), minf(1.0, delta * 8.0))
+		w.t += delta * (11.0 if t == 0 else 8.0)
+		w.timer = 0.0
 	else:
-		torch.emitting = true
-		if grid.damage_cell(Vector3i(tgt.x, top, tgt.z), power * delta):
-			w.target = grid.nearby_surface_cell(Vector3i(tgt.x, top, tgt.z), _rng, 3)
-	var ground := grid.surface_height_at(pos)
-	pos.y = lerpf(pos.y, ground, minf(1.0, delta * 8.0))
+		# Melt the spot just in front.
+		var fwd := -node.global_transform.basis.z
+		var spot := Vector3(pos.x, 0.0, pos.z) + fwd * 0.35
+		spot.y = grid.surface_y(spot.x, spot.z) - 0.12
+		grid.damage_sphere(spot, float(MELT_RADIUS[t]), power * delta)
+		w.timer += delta
+		w.t += delta * 3.0
+		if w.timer > MELT_TIME:
+			w.target = grid.nearby_surface_point(pos, _rng, 3.0)
+			w.timer = 0.0
+	fx.emitting = not walking
+	pos.y = lerpf(pos.y, grid.surface_y(pos.x, pos.z), minf(1.0, delta * 10.0))
 	w.pos = pos
-	node.position = pos + Vector3(0, 0.6 + absf(sin(w.wobble)) * 0.06, 0)
+	node.position = pos
+	_pose(w, 1.0 if walking else 0.0, 0.0 if walking else 1.0, false)
+
+
+func _pose(w: Dictionary, walk: float, work: float, party: bool) -> void:
+	## Waddle while walking, lean in while melting, flap while partying.
+	var body: Node3D = w.body
+	var node: Node3D = w.node
+	var ph: float = w.t
+	if int(w.type) == 0:
+		body.rotation = Vector3(-0.32 * work, 0.0, sin(ph) * 0.2 * walk)
+		var flap := 0.25 + (absf(sin(ph * 2.0)) * 0.9 if party else 0.0) + sin(ph * 4.0) * 0.08 * work
+		(body.get_node("FlipperL") as Node3D).rotation.z = -flap
+		(body.get_node("FlipperR") as Node3D).rotation.z = flap
+		(node.get_node("FootL") as Node3D).position.y = 0.03 + maxf(0.0, sin(ph)) * 0.05 * walk
+		(node.get_node("FootR") as Node3D).position.y = 0.03 + maxf(0.0, -sin(ph)) * 0.05 * walk
+	else:
+		body.rotation = Vector3(-0.12 * work, 0.0, sin(ph) * 0.08 * walk)
+		body.position.y = absf(sin(ph)) * 0.04 * walk
+		(node.get_node("FootL") as Node3D).position.y = maxf(0.0, sin(ph)) * 0.06 * walk
+		(node.get_node("FootR") as Node3D).position.y = maxf(0.0, -sin(ph)) * 0.06 * walk
+		if party:
+			body.rotation.z = sin(ph) * 0.2
 
 
 # --- Volcano ------------------------------------------------------------------------------
@@ -146,6 +197,7 @@ func _update_volcano(delta: float) -> void:
 		return
 	if _volcano == null:
 		_build_volcano()
+	_look_at_player()
 	if GameState.has_won or grid.remaining <= 0:
 		return
 	# More volcanoes = more frequent bombs, same damage per second each.
@@ -153,47 +205,47 @@ func _update_volcano(delta: float) -> void:
 	_bomb_timer += delta
 	if _bomb_timer >= interval:
 		_bomb_timer = 0.0
-		var c := grid.random_surface_cell(_rng)
-		if c.y >= 0:
-			var to := grid.cell_center(c) + Vector3(0, 0.5, 0)
-			_launch_bomb(to, GameState.helper_power(VOLCANO_TYPE) * interval)
+		var p := grid.random_surface_point(_rng)
+		if p != Vector3.INF:
+			_launch_bomb(p, GameState.helper_power(VOLCANO_TYPE) * interval)
 
 
 func _build_volcano() -> void:
-	_volcano = Node3D.new()
+	_volcano = Creatures.volcano()
 	_volcano.position = VOLCANO_POS + Vector3(0, -13, 0)
+	# Face the glacier.
+	var to := Vector3(0, 0, -12) - _volcano.position
+	_volcano.rotation.y = atan2(to.x, to.z)
 	add_child(_volcano)
-	var cone := MeshInstance3D.new()
-	var cm := CylinderMesh.new()
-	cm.top_radius = 2.5
-	cm.bottom_radius = 9.0
-	cm.height = 13.0
-	cm.radial_segments = 10
-	cone.mesh = cm
-	cone.position = Vector3(0, 6.5, 0)
-	var rock := StandardMaterial3D.new()
-	rock.albedo_color = Color(0.3, 0.22, 0.2)
-	cone.material_override = rock
-	_volcano.add_child(cone)
-	var lava := MeshInstance3D.new()
-	var lm := CylinderMesh.new()
-	lm.top_radius = 2.3
-	lm.bottom_radius = 2.3
-	lm.height = 0.3
-	lava.mesh = lm
-	lava.position = Vector3(0, 13.05, 0)
-	var glow := StandardMaterial3D.new()
-	glow.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
-	glow.albedo_color = Color(1.0, 0.45, 0.1)
-	lava.material_override = glow
-	_volcano.add_child(lava)
+	_smoke = _make_fx(Color(0.45, 0.42, 0.42, 0.55), Color(0.6, 0.6, 0.62, 0.0), 3.0, 26, 5.0)
+	_smoke.direction = Vector3(0, 1, 0)
+	_smoke.spread = 12.0
+	_smoke.initial_velocity_min = 2.0
+	_smoke.initial_velocity_max = 3.5
+	_smoke.gravity = Vector3(0.4, 0.3, 0.2)
+	_smoke.emission_shape = CPUParticles3D.EMISSION_SHAPE_SPHERE
+	_smoke.emission_sphere_radius = 1.2
+	_smoke.position = Vector3(0, 13.4, 0)
+	_volcano.add_child(_smoke)
+	_smoke.emitting = true
 	var label := Label3D.new()
 	label.text = "🌋 Kevin"
 	label.font_size = 96
 	label.pixel_size = 0.03
+	label.outline_size = 18
 	label.billboard = BaseMaterial3D.BILLBOARD_ENABLED
-	label.position = Vector3(0, 17, 0)
+	label.position = Vector3(0, 17.5, 0)
 	_volcano.add_child(label)
+
+
+func _look_at_player() -> void:
+	if player == null:
+		return
+	for eye_name in ["EyeL", "EyeR"]:
+		var eye: Node3D = _volcano.get_node(eye_name)
+		var pupil: Node3D = eye.get_node("Pupil")
+		var dir := eye.global_transform.basis.inverse() * (player.global_position + Vector3(0, 1.5, 0) - eye.global_position)
+		pupil.position = pupil.position.lerp(dir.normalized() * 0.85, 0.15)
 
 
 func _launch_bomb(to: Vector3, damage: float) -> void:
@@ -201,12 +253,21 @@ func _launch_bomb(to: Vector3, damage: float) -> void:
 	var sm := SphereMesh.new()
 	sm.radius = 0.45
 	sm.height = 0.9
+	sm.radial_segments = 10
+	sm.rings = 6
 	node.mesh = sm
 	var mat := StandardMaterial3D.new()
 	mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
 	mat.albedo_color = Color(1.0, 0.5, 0.1)
 	node.material_override = mat
 	add_child(node)
+	var trail := _make_fx(Color(1.0, 0.6, 0.2, 0.8), Color(0.5, 0.5, 0.5, 0.0), 0.7, 20, 0.8)
+	trail.spread = 180.0
+	trail.initial_velocity_min = 0.1
+	trail.initial_velocity_max = 0.4
+	trail.gravity = Vector3(0, 0.5, 0)
+	node.add_child(trail)
+	trail.emitting = true
 	var from := VOLCANO_POS + Vector3(0, 0.5, 0)
 	node.position = from
 	_bombs.append({"node": node, "from": from, "to": to, "t": 0.0, "dur": 1.8, "damage": damage})
@@ -223,38 +284,21 @@ func _update_bombs(delta: float) -> void:
 		var node: MeshInstance3D = b.node
 		node.position = p
 		if k >= 1.0:
-			grid.damage_sphere(to + Vector3(0, -0.5, 0), 1.7, b.damage)
+			grid.damage_sphere(to + Vector3(0, -0.4, 0), 1.7, b.damage)
 			_puff(to)
 			node.queue_free()
 			_bombs.erase(b)
 
 
 func _puff(at: Vector3) -> void:
-	var p := CPUParticles3D.new()
+	var p := _make_fx(Color(1, 1, 1, 0.8), Color(1, 1, 1, 0.0), 0.6, 24, 1.2)
 	p.one_shot = true
-	p.amount = 24
-	p.lifetime = 1.2
 	p.explosiveness = 0.9
 	p.direction = Vector3(0, 1, 0)
 	p.spread = 60.0
 	p.gravity = Vector3(0, 2.0, 0)
 	p.initial_velocity_min = 1.0
 	p.initial_velocity_max = 3.0
-	var quad := QuadMesh.new()
-	quad.size = Vector2(0.5, 0.5)
-	var mat := StandardMaterial3D.new()
-	mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
-	mat.billboard_mode = BaseMaterial3D.BILLBOARD_PARTICLES
-	mat.billboard_keep_scale = true   # particle scale (and hidden, zero-size particles) need this
-	mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
-	mat.vertex_color_use_as_albedo = true
-	mat.albedo_texture = UiTheme.soft_dot()
-	quad.material = mat
-	p.mesh = quad
-	var ramp := Gradient.new()
-	ramp.set_color(0, Color(1, 1, 1, 0.8))
-	ramp.set_color(1, Color(1, 1, 1, 0.0))
-	p.color_ramp = ramp
 	p.position = at
 	add_child(p)
 	p.emitting = true

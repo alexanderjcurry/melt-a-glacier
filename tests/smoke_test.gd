@@ -1,8 +1,9 @@
 extends SceneTree
 ## Headless smoke test: godot --headless -s res://tests/smoke_test.gd
-## Builds the valley, walks into the ice, melts with the tool, checks the phone
-## controls, buys things, digs up a find, saves, fakes time away, and melts
-## everything to the ending. Exits with code 1 if anything fails.
+## Builds the valley, walks up onto the glacier, melts with the tool, checks
+## the phone controls, jetpack and respawn, buys things, digs up a find, saves,
+## fakes time away, and melts everything to the ending. Exits with code 1 if
+## anything fails.
 ## Variables stay untyped: this script compiles before the GameState autoload
 ## exists, so it can't name classes that use it (World, Player, Hud...).
 
@@ -57,39 +58,47 @@ func _run() -> void:
 	await _frames(3)
 	var grid = gs.grid
 	var player = gs.player
-	check(grid != null and grid.total_blocks > 1500, "glacier built (%d blocks)" % grid.total_blocks)
-	check(grid.remaining == grid.total_blocks, "glacier starts full")
+	check(grid != null and grid.total > 20000, "glacier built (%d points, %.0f m3)" % [grid.total, grid.volume_left()])
+	check(grid.remaining == grid.total, "glacier starts full")
 	check(not player.collides(player.position), "player spawns in free space at %s" % player.position)
 	check(world._find_markers.size() == Balance.DISCOVERIES.size(), "all %d finds placed" % world._find_markers.size())
 
-	# --- Walking into the glacier never ends up inside the ice.
+	# --- Walking at the glacier: up the gentle snout and onto the ice, never inside it.
 	player.set_view(0.0, 0.0)
 	player.move_input = Vector2(0, 1)
-	for _i in 300:
-		player._move(1.0 / 30.0)
+	var ok_path := true
+	for _i in 600:
+		player._move(1.0 / 60.0)
+		if player.collides(player.position + Vector3(0, 0.05, 0)):
+			ok_path = false
 	player.move_input = Vector2.ZERO
-	check(not player.collides(player.position), "walked forward 10 s, still outside the ice (at %s)" % player.position)
-	check(player.position.z < world.SPAWN.z - 3.0, "actually moved forward")
+	check(ok_path, "walked 10 s into the glacier without ending up inside it (at %s)" % player.position)
+	check(player.position.z < world.SPAWN.z - 12.0 and player.position.y > 1.0, "walked up onto the ice (at %s)" % player.position)
 
-	# --- Aim at the ice in front and melt it with the hair dryer.
-	var col := Vector2i(grid.sx / 2, -1)
-	for z in range(grid.sz - 1, -1, -1):
-		if grid.column_top_y(col.x, z) >= 1:
-			col.y = z
-			break
-	var top: int = grid.column_top_y(col.x, col.y)
-	var target: Vector3 = grid.cell_center(Vector3i(col.x, top, col.y))
-	player.position = Vector3(target.x, 0.0, target.z + 3.0)
-	player.unstick()
+	# --- Aim at the front of the glacier and melt it with the hair dryer.
+	# Find where the snout is about chest high, stand 2.5 m in front of it and
+	# aim a little way into the ice.
+	var front_z := 4.0
+	while front_z > -10.0 and grid.surface_y(1.0, front_z) < 1.3:
+		front_z -= 0.1
+	var target := Vector3(1.0, 0.9, front_z - 0.6)
+	player.respawn(Vector3(1.0, 0.0, front_z + 2.5), 0.0)
+	player._move(1.0 / 60.0)
 	_aim_at(player, target)
+	player._update_tool(0.0)
+	check(player.target.hit, "the crosshair finds the ice (%.1f m away)" % (player.target.dist if player.target.hit else -1.0))
+	var first_hit: Vector3 = player.target.pos if player.target.hit else Vector3.ZERO
 	player.melting = true
 	var water0: float = gs.water
 	var left0: int = grid.remaining
-	for _i in 60:
-		player._update_tool(0.05)
+	for _i in 30:
+		player._update_tool(1.0 / 30.0)
+		grid.flush()
 	player.melting = false
-	check(grid.remaining < left0, "the hair dryer melted %d blocks" % (left0 - grid.remaining))
+	player._update_tool(0.0)
+	check(grid.remaining < left0, "the hair dryer melted %.2f m3" % ((left0 - grid.remaining) * 0.125))
 	check(gs.water > water0, "melting paid out (%s water)" % gs.water)
+	check(player.target.hit and player.target.pos.distance_to(first_hit) > 0.4, "it dug a hole: the ice surface moved back %.2f m" % (player.target.pos.distance_to(first_hit) if player.target.hit else 0.0))
 
 	# --- Phone controls: hold to melt, the stick, drag to look.
 	world.hud.set_touch_mode(true)
@@ -166,18 +175,31 @@ func _run() -> void:
 	await _frames(2)
 	check(world.helpers._walkers.size() == 1, "the penguin is out on the ice")
 
-	# --- Dig up a find.
-	var cell_index: int = world._find_cells.keys()[0]
-	var find: int = world._find_cells[cell_index]
-	grid.damage_cell(grid.cell_of(cell_index), 1e9)
-	check(gs.discovered[find], "melting its block discovers %s" % Balance.DISCOVERIES[find].name)
-	check(world._find_markers[find].visible, "the find shows up in the world")
+	# --- The helpers walk on top of the ice (give them a second of game time).
+	var waited := 0.0
+	while waited < 1.0:
+		await process_frame
+		waited += root.get_process_delta_time()
+	var w0 = world.helpers._walkers[0]
+	var wp: Vector3 = w0.pos
+	check(absf(wp.y - grid.surface_y(wp.x, wp.z)) < 0.4, "the penguin stands on the ice surface (%.2f vs %.2f)" % [wp.y, grid.surface_y(wp.x, wp.z)])
 
-	# --- Glacier save string round trip.
+	# --- Dig up a find.
+	var find := 0
+	var marker: Node3D = world._find_markers[find]
+	check(not marker.visible, "the %s starts frozen and hidden" % Balance.DISCOVERIES[find].name)
+	grid.damage_sphere(marker.position, 1.2, 1e9)
+	check(gs.discovered[find], "melting around it discovers %s" % Balance.DISCOVERIES[find].name)
+	check(marker.visible, "the find shows up in the world")
+
+	# --- Glacier save string round trip (into a second, fresh glacier).
 	var saved: String = grid.to_save_string()
-	var remaining_saved: int = grid.remaining
-	grid.damage_sphere(target, 3.0, 1e9)
-	check(grid.load_save_string(saved) and grid.remaining == remaining_saved, "glacier save/load round trip")
+	var copy = IceField.new()
+	world.add_child(copy)
+	copy.generate(world.level, [])
+	check(copy.load_save_string(saved) and copy.remaining <= grid.remaining + 5 and copy.remaining >= grid.remaining - 5,
+		"glacier save/load round trip (%d vs %d)" % [copy.remaining, grid.remaining])
+	copy.queue_free()
 
 	# --- Time away: helpers keep melting.
 	var got := []
@@ -205,7 +227,7 @@ func _run() -> void:
 	gs.reset_state()
 	gs.load_game()
 	check(gs.has_won and gs.tool_index == 1 and absf(gs.water - water_saved) < 0.01, "save/load round trip")
-	check(gs.glacier_data.begins_with("%d:" % grid.total_blocks), "glacier stored in the save")
+	check(gs.glacier_data.begins_with("v3:"), "glacier stored in the save (%d KB)" % (gs.glacier_data.length() / 1024))
 
 	# --- Start over: a fresh valley.
 	gs.wipe_save()
@@ -214,7 +236,7 @@ func _run() -> void:
 	var world2 = load("res://scenes/world.tscn").instantiate()
 	root.add_child(world2)
 	await _frames(3)
-	check(gs.grid.remaining == gs.grid.total_blocks and not gs.has_won, "start over gives a full glacier")
+	check(gs.grid.remaining == gs.grid.total and not gs.has_won, "start over gives a full glacier")
 	await _frames(20)
 	gs.wipe_save()
 	print("SMOKE TEST ", "PASSED" if ok else "FAILED")

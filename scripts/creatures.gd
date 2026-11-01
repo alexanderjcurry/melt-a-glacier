@@ -1,0 +1,329 @@
+class_name Creatures
+extends RefCounted
+## Low-poly 3D models for the helpers, built in code from MeshKit primitives.
+## Each model faces -Z and stands on y = 0. Parts that animate (flippers,
+## feet) are separate child nodes; everything else is one vertex-coloured mesh.
+
+const PENGUIN_BLACK := Color(0.08, 0.1, 0.15)
+const PENGUIN_WHITE := Color(0.97, 0.97, 0.95)
+const BEAK := Color(1.0, 0.56, 0.12)
+const SCARVES := [Color(0.85, 0.18, 0.2), Color(0.2, 0.55, 0.9), Color(0.98, 0.78, 0.2),
+	Color(0.35, 0.75, 0.35), Color(0.75, 0.35, 0.85)]
+const TOWELS := [Color(0.97, 0.97, 0.94), Color(0.65, 0.82, 0.98), Color(1.0, 0.75, 0.82), Color(1.0, 0.9, 0.55)]
+const SKINS := [Color(0.98, 0.78, 0.66), Color(0.86, 0.62, 0.46), Color(0.6, 0.4, 0.28), Color(0.95, 0.72, 0.58)]
+
+static var _cache := {}
+
+
+static func _mesh_instance(mesh: Mesh, parent: Node3D, pos: Vector3 = Vector3.ZERO) -> MeshInstance3D:
+	var mi := MeshInstance3D.new()
+	mi.mesh = mesh
+	mi.material_override = MeshKit.material()
+	mi.position = pos
+	parent.add_child(mi)
+	return mi
+
+
+# =====================================================================================
+# Penguin with a tiny torch (about 0.75 m tall)
+# =====================================================================================
+static func penguin(variant: int) -> Node3D:
+	## Children: Body (the rig that rolls and leans), and under it FlipperL,
+	## FlipperR, FootL, FootR (pivots), and Nozzle (where the torch flame comes out).
+	var root := Node3D.new()
+	var body := Node3D.new()
+	body.name = "Body"
+	root.add_child(body)
+	_mesh_instance(_penguin_body(variant % SCARVES.size()), body)
+	for side in [-1.0, 1.0]:
+		var flipper := Node3D.new()
+		flipper.name = "FlipperL" if side < 0.0 else "FlipperR"
+		flipper.position = Vector3(0.205 * side, 0.52, 0.0)
+		body.add_child(flipper)
+		_mesh_instance(_penguin_flipper(side), flipper)
+		var foot := Node3D.new()
+		foot.name = "FootL" if side < 0.0 else "FootR"
+		foot.position = Vector3(0.085 * side, 0.03, -0.04)
+		root.add_child(foot)
+		_mesh_instance(_penguin_foot(), foot)
+	var nozzle := Node3D.new()
+	nozzle.name = "Nozzle"
+	nozzle.position = Vector3(0.13, 0.2, -0.36)
+	body.add_child(nozzle)
+	return root
+
+
+static func _penguin_body(scarf: int) -> ArrayMesh:
+	var key := "penguin_body_%d" % scarf
+	if _cache.has(key):
+		return _cache[key]
+	var st := MeshKit.begin()
+	MeshKit.ellipsoid(st, Vector3(0, 0.34, 0.01), Vector3(0.23, 0.31, 0.21), PENGUIN_BLACK)
+	MeshKit.ellipsoid(st, Vector3(0, 0.31, -0.075), Vector3(0.18, 0.26, 0.15), PENGUIN_WHITE)
+	MeshKit.ellipsoid(st, Vector3(0, 0.66, -0.005), Vector3(0.165, 0.155, 0.16), PENGUIN_BLACK)
+	MeshKit.ellipsoid(st, Vector3(0, 0.645, -0.085), Vector3(0.125, 0.105, 0.09), PENGUIN_WHITE)
+	for side in [-1.0, 1.0]:
+		MeshKit.ellipsoid(st, Vector3(0.056 * side, 0.678, -0.158), Vector3(0.027, 0.03, 0.02), Color(0.03, 0.03, 0.05), Basis.IDENTITY, 6, 10)
+		MeshKit.ellipsoid(st, Vector3(0.05 * side, 0.69, -0.176), Vector3(0.009, 0.009, 0.006), Color.WHITE, Basis.IDENTITY, 4, 6)
+		MeshKit.ellipsoid(st, Vector3(0.092 * side, 0.625, -0.135), Vector3(0.03, 0.018, 0.012), Color(1.0, 0.6, 0.65), Basis.IDENTITY, 4, 8)
+	MeshKit.cylinder(st, Vector3(0, 0.64, -0.15), Vector3(0, 0.625, -0.28), 0.042, 0.0, BEAK, 10)
+	# Scarf: a band round the neck and a tail hanging down the front.
+	var sc: Color = SCARVES[scarf]
+	MeshKit.cylinder(st, Vector3(0, 0.5, 0.0), Vector3(0, 0.565, 0.0), 0.178, 0.17, sc, 16)
+	MeshKit.box(st, Vector3(0.09, 0.44, -0.165), Vector3(0.07, 0.15, 0.03), sc.darkened(0.1), Basis(Vector3.FORWARD, 0.15))
+	# The tiny torch, held out in front: a red gas can with a brass nozzle.
+	MeshKit.cylinder(st, Vector3(0.13, 0.3, -0.2), Vector3(0.13, 0.25, -0.3), 0.04, 0.04, Color(0.85, 0.15, 0.12), 10)
+	MeshKit.cylinder(st, Vector3(0.13, 0.25, -0.3), Vector3(0.13, 0.205, -0.36), 0.016, 0.01, Color(0.85, 0.7, 0.3), 8)
+	var mesh := MeshKit.finish(st)
+	_cache[key] = mesh
+	return mesh
+
+
+static func _penguin_flipper(side: float) -> ArrayMesh:
+	var key := "penguin_flipper_%d" % int(side)
+	if _cache.has(key):
+		return _cache[key]
+	var st := MeshKit.begin()
+	MeshKit.ellipsoid(st, Vector3(0.03 * side, -0.15, 0.0), Vector3(0.032, 0.16, 0.085), PENGUIN_BLACK,
+		Basis(Vector3.BACK, 0.22 * side), 6, 10)
+	var mesh := MeshKit.finish(st)
+	_cache[key] = mesh
+	return mesh
+
+
+static func _penguin_foot() -> ArrayMesh:
+	if _cache.has("penguin_foot"):
+		return _cache["penguin_foot"]
+	var st := MeshKit.begin()
+	MeshKit.ellipsoid(st, Vector3(0, 0.0, -0.04), Vector3(0.065, 0.028, 0.1), BEAK, Basis.IDENTITY, 5, 10)
+	var mesh := MeshKit.finish(st)
+	_cache["penguin_foot"] = mesh
+	return mesh
+
+
+# =====================================================================================
+# Sauna crew member: towel, turban, bucket of hot stones (about 1.25 m tall)
+# =====================================================================================
+static func sauna(variant: int) -> Node3D:
+	## Children: Body (rig), Bucket (where the steam comes from), FootL, FootR.
+	var root := Node3D.new()
+	var body := Node3D.new()
+	body.name = "Body"
+	root.add_child(body)
+	var towel := variant % TOWELS.size()
+	var skin := (variant / TOWELS.size() + variant) % SKINS.size()
+	_mesh_instance(_sauna_body(towel, skin), body)
+	var bucket := Node3D.new()
+	bucket.name = "Bucket"
+	bucket.position = Vector3(0, 0.7, -0.27)
+	body.add_child(bucket)
+	for side in [-1.0, 1.0]:
+		var foot := Node3D.new()
+		foot.name = "FootL" if side < 0.0 else "FootR"
+		foot.position = Vector3(0.085 * side, 0.0, 0.0)
+		root.add_child(foot)
+		_mesh_instance(_sauna_leg(skin), foot)
+	return root
+
+
+static func _sauna_body(towel: int, skin: int) -> ArrayMesh:
+	var key := "sauna_%d_%d" % [towel, skin]
+	if _cache.has(key):
+		return _cache[key]
+	var st := MeshKit.begin()
+	var tc: Color = TOWELS[towel]
+	var sk: Color = SKINS[skin]
+	var stripe := tc.darkened(0.25) if towel == 0 else tc.darkened(0.3)
+	# Towel wrapped round the middle, with a stripe.
+	MeshKit.cylinder(st, Vector3(0, 0.3, 0), Vector3(0, 0.82, 0), 0.215, 0.19, tc, 16)
+	MeshKit.cylinder(st, Vector3(0, 0.4, 0), Vector3(0, 0.46, 0), 0.222, 0.219, stripe, 16, false)
+	MeshKit.cylinder(st, Vector3(0, 0.68, 0), Vector3(0, 0.72, 0), 0.204, 0.2, stripe, 16, false)
+	# Shoulders, neck, head.
+	MeshKit.ellipsoid(st, Vector3(0, 0.84, 0), Vector3(0.21, 0.11, 0.15), sk)
+	MeshKit.cylinder(st, Vector3(0, 0.86, 0), Vector3(0, 0.96, 0), 0.06, 0.06, sk, 8, false)
+	MeshKit.ellipsoid(st, Vector3(0, 1.04, 0), Vector3(0.13, 0.135, 0.13), sk)
+	MeshKit.ellipsoid(st, Vector3(0, 1.025, -0.13), Vector3(0.024, 0.024, 0.024), sk.darkened(0.05), Basis.IDENTITY, 4, 8)
+	for side in [-1.0, 1.0]:
+		# Happy closed eyes, rosy cheeks.
+		MeshKit.ellipsoid(st, Vector3(0.047 * side, 1.055, -0.118), Vector3(0.026, 0.007, 0.01), Color(0.2, 0.12, 0.1), Basis(Vector3.FORWARD, 0.25 * side), 3, 8)
+		MeshKit.ellipsoid(st, Vector3(0.075 * side, 1.01, -0.105), Vector3(0.03, 0.02, 0.012), Color(1.0, 0.5, 0.5), Basis.IDENTITY, 4, 8)
+		# Arms reaching forward to hold the bucket.
+		MeshKit.cylinder(st, Vector3(0.19 * side, 0.85, 0.0), Vector3(0.16 * side, 0.7, -0.17), 0.048, 0.042, sk, 8)
+		MeshKit.cylinder(st, Vector3(0.16 * side, 0.7, -0.17), Vector3(0.12 * side, 0.68, -0.25), 0.042, 0.04, sk, 8)
+		MeshKit.ellipsoid(st, Vector3(0.12 * side, 0.68, -0.26), Vector3(0.045, 0.045, 0.045), sk, Basis.IDENTITY, 5, 8)
+	# Towel turban with a knot.
+	MeshKit.ellipsoid(st, Vector3(0, 1.14, 0.01), Vector3(0.155, 0.1, 0.155), tc)
+	MeshKit.ellipsoid(st, Vector3(0, 1.21, -0.06), Vector3(0.06, 0.05, 0.05), tc.darkened(0.05), Basis.IDENTITY, 5, 8)
+	# Wooden bucket of glowing stones.
+	MeshKit.cylinder(st, Vector3(0, 0.56, -0.27), Vector3(0, 0.7, -0.27), 0.11, 0.125, Color(0.6, 0.38, 0.2), 12)
+	MeshKit.cylinder(st, Vector3(0, 0.6, -0.27), Vector3(0, 0.625, -0.27), 0.119, 0.122, Color(0.3, 0.3, 0.32), 12, false)
+	MeshKit.ellipsoid(st, Vector3(-0.03, 0.705, -0.26), Vector3(0.05, 0.03, 0.05), Color(1.0, 0.45, 0.12), Basis.IDENTITY, 4, 8)
+	MeshKit.ellipsoid(st, Vector3(0.04, 0.705, -0.29), Vector3(0.045, 0.028, 0.045), Color(0.95, 0.3, 0.1), Basis.IDENTITY, 4, 8)
+	var mesh := MeshKit.finish(st)
+	_cache[key] = mesh
+	return mesh
+
+
+static func _sauna_leg(skin: int) -> ArrayMesh:
+	var key := "sauna_leg_%d" % skin
+	if _cache.has(key):
+		return _cache[key]
+	var st := MeshKit.begin()
+	var sk: Color = SKINS[skin]
+	MeshKit.cylinder(st, Vector3(0, 0.04, 0), Vector3(0, 0.36, 0), 0.05, 0.058, sk, 8)
+	MeshKit.ellipsoid(st, Vector3(0, 0.03, -0.035), Vector3(0.05, 0.03, 0.085), sk, Basis.IDENTITY, 4, 8)
+	var mesh := MeshKit.finish(st)
+	_cache[key] = mesh
+	return mesh
+
+
+# =====================================================================================
+# Kevin, the adopted volcano (with googly eyes)
+# =====================================================================================
+static func volcano() -> Node3D:
+	## Children: Lava (the crater's glow), EyeL/EyeR (pivots; their child Pupil looks around).
+	var root := Node3D.new()
+	var body := MeshInstance3D.new()
+	body.name = "Body"
+	body.mesh = _volcano_mesh()
+	body.material_override = Scenery.rock_material(0.35)
+	root.add_child(body)
+	# A smile under the eyes (the face looks along +Z).
+	var st := MeshKit.begin()
+	var prev := Vector3.INF
+	for k in 9:
+		var t := -1.0 + 2.0 * k / 8.0
+		var ang := t * 0.24
+		var y := 6.25 - 0.55 * (1.0 - t * t)
+		var r := _volcano_radius(y) + 0.12
+		var p := Vector3(sin(ang) * r, y, cos(ang) * r)
+		if prev.is_finite():
+			MeshKit.cylinder(st, prev, p, 0.2, 0.2, Color(0.12, 0.05, 0.04), 6, false)
+		MeshKit.ellipsoid(st, p, Vector3.ONE * 0.2, Color(0.12, 0.05, 0.04), Basis.IDENTITY, 4, 6)
+		prev = p
+	for side in [-1.0, 1.0]:   # rosy (well, glowing) cheeks
+		var ang: float = 0.42 * side
+		var y := 6.9
+		var r := _volcano_radius(y) - 0.05
+		MeshKit.ellipsoid(st, Vector3(sin(ang) * r, y, cos(ang) * r), Vector3(0.7, 0.45, 0.3),
+				Color(1.0, 0.45, 0.35), Basis(Vector3.UP, ang), 5, 8)
+	var face := MeshInstance3D.new()
+	face.mesh = MeshKit.finish(st)
+	face.material_override = MeshKit.material()
+	root.add_child(face)
+	var lava := MeshInstance3D.new()
+	lava.name = "Lava"
+	var disk := CylinderMesh.new()
+	disk.top_radius = 1.85
+	disk.bottom_radius = 1.85
+	disk.height = 0.3
+	disk.radial_segments = 20
+	lava.mesh = disk
+	lava.position = Vector3(0, 12.55, 0)
+	var glow := StandardMaterial3D.new()
+	glow.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	glow.albedo_color = Color(1.0, 0.55, 0.15)
+	lava.material_override = glow
+	root.add_child(lava)
+	# Googly eyes on the side facing the glacier (+Z after the root is turned).
+	var white := StandardMaterial3D.new()
+	white.albedo_color = Color(0.98, 0.98, 0.96)
+	white.roughness = 0.3
+	var black := StandardMaterial3D.new()
+	black.albedo_color = Color(0.03, 0.03, 0.04)
+	black.roughness = 0.2
+	for side in [-1.0, 1.0]:
+		var ang: float = 0.33 * side
+		var eye := Node3D.new()
+		eye.name = "EyeL" if side < 0.0 else "EyeR"
+		var er := _volcano_radius(8.4) + 0.55
+		eye.position = Vector3(sin(ang) * er, 8.4, cos(ang) * er)
+		root.add_child(eye)
+		var ball := MeshInstance3D.new()
+		var sm := SphereMesh.new()
+		sm.radius = 1.25
+		sm.height = 2.5
+		ball.mesh = sm
+		ball.material_override = white
+		eye.add_child(ball)
+		var pupil := MeshInstance3D.new()
+		pupil.name = "Pupil"
+		var pm := SphereMesh.new()
+		pm.radius = 0.6
+		pm.height = 1.2
+		pupil.mesh = pm
+		pupil.material_override = black
+		pupil.position = Vector3(0, 0, 0.85)
+		eye.add_child(pupil)
+	return root
+
+
+# Kevin's shape: (height, radius) up the side, then over the crater's lip.
+const VOLCANO_PROFILE := [[0.0, 10.0], [1.2, 8.6], [3.0, 7.3], [5.5, 5.9], [8.0, 4.6], [10.4, 3.4],
+	[12.2, 2.6], [13.0, 2.35], [12.9, 1.95], [12.4, 1.8]]
+const LAVA_STREAKS := [[0.95, 4.0], [3.05, 6.5], [5.0, 2.5]]   # angle, lowest height
+
+
+static func _volcano_radius(y: float) -> float:
+	for i in VOLCANO_PROFILE.size() - 1:
+		var a: Array = VOLCANO_PROFILE[i]
+		var b: Array = VOLCANO_PROFILE[i + 1]
+		if y <= b[0]:
+			return lerpf(a[1], b[1], clampf((y - a[0]) / maxf(b[0] - a[0], 0.001), 0.0, 1.0))
+	return VOLCANO_PROFILE[6][1]
+
+
+static func _volcano_mesh() -> ArrayMesh:
+	## A lumpy cone with a crater. Vertex colour = rock tint; alpha 0 = lava.
+	if _cache.has("volcano"):
+		return _cache["volcano"]
+	var noise := FastNoiseLite.new()
+	noise.seed = 1977
+	noise.frequency = 0.6
+	var segs := 44
+	var rings := VOLCANO_PROFILE.size()
+	var pts := []
+	for r in rings:
+		var prof: Array = VOLCANO_PROFILE[r]
+		var row := []
+		for sg in segs:
+			var a := TAU * float(sg) / segs
+			var lump := 1.0 + 0.08 * noise.get_noise_2d(cos(a) * 3.0, prof[0] * 0.35 + sin(a) * 3.0)
+			if r >= rings - 3:
+				lump = 1.0 + 0.03 * noise.get_noise_2d(cos(a) * 3.0, sin(a) * 3.0)
+			var rad: float = prof[1] * lump
+			row.append(Vector3(sin(a) * rad, prof[0], cos(a) * rad))
+		pts.append(row)
+	var st := SurfaceTool.new()
+	st.begin(Mesh.PRIMITIVE_TRIANGLES)
+	var rock := Color(0.36, 0.29, 0.26)
+	for r in rings - 1:
+		for sg in segs:
+			var s2 := (sg + 1) % segs
+			var quad := [pts[r][sg], pts[r][s2], pts[r + 1][s2], pts[r + 1][sg]]
+			var cols := []
+			for q in [[r, sg], [r, s2], [r + 1, s2], [r + 1, sg]]:
+				cols.append(_volcano_color(q[0], q[1], segs, rock))
+			for tri in [[0, 2, 1], [0, 3, 2]]:
+				for t in tri:
+					st.set_color(cols[t])
+					st.add_vertex(quad[t])
+	st.generate_normals()
+	var mesh := st.commit()
+	_cache["volcano"] = mesh
+	return mesh
+
+
+static func _volcano_color(ring: int, seg: int, segs: int, rock: Color) -> Color:
+	var prof: Array = VOLCANO_PROFILE[ring]
+	var y: float = prof[0]
+	var a := TAU * float(seg) / segs
+	if ring >= VOLCANO_PROFILE.size() - 3:
+		return Color(0.2, 0.15, 0.14)   # scorched crater lip
+	for streak in LAVA_STREAKS:
+		var da := absf(wrapf(a - float(streak[0]), -PI, PI))
+		var width := lerpf(0.05, 0.2, clampf((y - float(streak[1])) / 8.0, 0.0, 1.0))
+		if y >= float(streak[1]) and da < width:
+			return Color(1.0, 0.45, 0.1, 0.0)
+	var shade := 0.9 + 0.2 * fmod(float(seg * 7 + ring * 3), 5.0) / 5.0
+	return Color(rock.r * shade, rock.g * shade, rock.b * shade)

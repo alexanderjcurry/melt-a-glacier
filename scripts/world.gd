@@ -10,6 +10,7 @@ const SHED_POS := Vector3(9.5, 0.0, 11.5)      # centre of the shed floor
 const SHED_DOOR := Vector3(7.3, 0.0, 11.5)     # just outside the door (on the -x side)
 const SHED_REACH := 2.6
 const FLOAT_POOL := 24
+const FINALE_FRACTION := 0.012     # when this little ice is left, the rest melts by itself
 const MAX_FLOATS_PER_FRAME := 3
 
 # The village frozen in the ice. Footprints sit on whole metres so the ice can
@@ -32,17 +33,18 @@ const SPIRE := 3.8
 const VILLAGERS = ["👵", "👴", "🧒", "👩", "👨", "🐕", "🐈", "🐓"]
 const FLOWERS = ["🌼", "🌷", "🌸", "🌻"]
 
-var grid: IceGrid
+var level: Dictionary = Levels.current()
+var grid: IceField
 var player: Player
 var helpers: HelperSwarm
 var hud: Hud
 var solids: Array[AABB] = []
 
 var _ground_mat: StandardMaterial3D
+var _mountains: MeshInstance3D
 var _grass := Color(0.4, 0.62, 0.28)
 var _moraine := Color(0.55, 0.46, 0.34)
 var _mats := {}
-var _find_cells := {}          # grid cell index -> discovery index
 var _find_markers := {}        # discovery index -> Label3D
 var _flowers: Array = []       # {node, x, z, threshold}
 var _villagers: Array = []     # Label3D
@@ -50,7 +52,13 @@ var _floats: Array = []        # {node, t}
 var _float_i := 0
 var _floats_this_frame := 0
 var _mouse_melt := false
+var _world_body: StaticBody3D  # ground, houses, the shed, rocks, tree trunks
+var _pending_water := 0.0      # meltwater to show as a floating number soon
+var _pending_at := Vector3.ZERO
+var _pending_timer := 0.0
 var force_melt := false        # tests and screenshots
+var _quality := 1.0            # extra render-scale factor for slow devices
+var _fps_timer := 0.0
 var _slow_timer := 0.0
 var _coach_timer := 0.0
 var _rng := RandomNumberGenerator.new()
@@ -59,6 +67,13 @@ var _rng := RandomNumberGenerator.new()
 func _ready() -> void:
 	UiTheme.install_emoji_font()
 	_rng.seed = Balance.WORLD_SEED + 11
+	_world_body = StaticBody3D.new()
+	_world_body.collision_layer = Player.WORLD_LAYER
+	_world_body.collision_mask = 0
+	add_child(_world_body)
+	var floor_shape := CollisionShape3D.new()
+	floor_shape.shape = WorldBoundaryShape3D.new()
+	_world_body.add_child(floor_shape)
 	_build_environment()
 	_build_ground()
 	_build_mountains()
@@ -66,13 +81,16 @@ func _ready() -> void:
 	_build_shed()
 	_build_trees()
 
-	grid = IceGrid.new()
-	grid.generate(carve)
+	grid = IceField.new()
+	add_child(grid)
+	grid.generate(level, carve)
 	if GameState.glacier_data != "":
 		grid.load_save_string(GameState.glacier_data)
-	add_child(grid)
 	GameState.grid = grid
-	grid.block_melted.connect(_on_block_melted)
+	grid.ice_melted.connect(_on_ice_melted)
+	grid.find_exposed.connect(_on_find_exposed)
+	for box in solids:
+		_add_solid_shape(box)
 	_place_finds()
 	_build_flowers()
 	_build_villagers()
@@ -80,7 +98,6 @@ func _ready() -> void:
 
 	player = Player.new()
 	player.grid = grid
-	player.solids = solids
 	add_child(player)
 	var pos := GameState.player_pos if GameState.player_pos.is_finite() else SPAWN
 	pos.x = clampf(pos.x, player.bounds_min.x + 0.5, player.bounds_max.x - 0.5)
@@ -96,6 +113,7 @@ func _ready() -> void:
 
 	helpers = HelperSwarm.new()
 	helpers.grid = grid
+	helpers.player = player
 	add_child(helpers)
 
 	hud = Hud.new()
@@ -123,13 +141,33 @@ func respawn() -> void:
 
 func _fit_render_scale() -> void:
 	## Phones have tiny, very dense screens: draw the 3D view at a lower
-	## resolution (the HUD stays sharp) so it runs smoothly.
+	## resolution (the HUD stays sharp) so it runs smoothly. Slow devices get
+	## turned down further by _watch_frame_rate().
 	var px := Vector2(get_window().size)
 	var budget := 1.3e6 if DisplayServer.is_touchscreen_available() else 2.4e6
-	var s := clampf(sqrt(budget / maxf(px.x * px.y, 1.0)), 0.5, 1.0)
+	var s := clampf(sqrt(budget / maxf(px.x * px.y, 1.0)) * _quality, 0.4, 1.0)
 	var vp := get_viewport()
 	vp.scaling_3d_mode = Viewport.SCALING_3D_MODE_BILINEAR
 	vp.scaling_3d_scale = s
+
+
+func _watch_frame_rate(delta: float) -> void:
+	## Every few seconds: if the game is struggling, draw the 3D view at a
+	## lower resolution; if it's flying, creep back up.
+	_fps_timer += delta
+	if _fps_timer < 4.0:
+		return
+	_fps_timer = 0.0
+	if Time.get_ticks_msec() < 8000:
+		return   # still settling in after loading
+	var fps := Engine.get_frames_per_second()
+	var was := _quality
+	if fps < 40.0:
+		_quality = maxf(0.55, _quality - 0.12)
+	elif fps > 57.0:
+		_quality = minf(1.0, _quality + 0.05)
+	if _quality != was:
+		_fit_render_scale()
 
 
 func _exit_tree() -> void:
@@ -144,6 +182,12 @@ func _exit_tree() -> void:
 # =====================================================================================
 func _process(delta: float) -> void:
 	_floats_this_frame = 0
+	_watch_frame_rate(delta)
+	_pending_timer += delta
+	if _pending_timer >= 0.3 and _pending_water > 0.0:
+		_float_text(_pending_at, "+" + Fmt.num(_pending_water))
+		_pending_water = 0.0
+		_pending_timer = 0.0
 	var mv := Vector2.ZERO
 	if Input.is_physical_key_pressed(KEY_W) or Input.is_physical_key_pressed(KEY_UP):
 		mv.y += 1.0
@@ -219,55 +263,67 @@ func _unhandled_input(event: InputEvent) -> void:
 # =====================================================================================
 # Melting, finds, floating numbers
 # =====================================================================================
-func _on_block_melted(cell: Vector3i, layer: int) -> void:
-	var v := GameState.on_block_melted(layer)
-	var i := grid.idx(cell.x, cell.y, cell.z)
-	if _find_cells.has(i):
-		var d: int = _find_cells[i]
-		_find_cells.erase(i)
-		_reveal_find(d, true)
-		GameState.discover(d)
-	_float_text(grid.cell_center(cell), "+" + Fmt.num(v))
+func _on_ice_melted(at: Vector3, points: int, hp: float) -> void:
+	var v := GameState.on_ice_melted(points, hp)
+	if at.is_finite():
+		_pending_water += v
+		_pending_at = at + Vector3(0, 0.4, 0)
+	if GameState.has_won:
+		return
 	if grid.remaining <= 0:
 		GameState.check_win()
+	elif grid.fraction_left() < FINALE_FRACTION:
+		# The last crumbs of the glacier collapse into slush on their own.
+		hud.toast("💦 The last of the glacier collapses into slush!")
+		grid.melt_everything.call_deferred()
+
+
+func _on_find_exposed(d: int) -> void:
+	_reveal_find(d, true)
+	GameState.discover(d)
 
 
 func _place_finds() -> void:
-	## Each find is frozen in a fixed cell at its layer's depth, the same every game.
+	## Each find is frozen at a fixed spot at its layer's depth, the same every game.
 	var rng := RandomNumberGenerator.new()
 	rng.seed = Balance.WORLD_SEED + 7
-	var used := {}
+	var spots: Array = []
 	for d in Balance.DISCOVERIES.size():
 		var want: int = Balance.DISCOVERIES[d].layer
-		var cell := Vector3i(-1, -1, -1)
+		var spot := Vector3.INF
 		for _t in 4000:
-			var x := rng.randi_range(2, grid.sx - 3)
-			var z := rng.randi_range(2, grid.sz - 3)
-			var h: int = grid.heights[x + z * grid.sx]
-			var y := h - 1 - want
-			if y < 0:
+			var x := rng.randf_range(-12.5, 12.5)
+			var z := rng.randf_range(-26.0, 1.0)
+			var y := grid.original_top(x, z) - (float(want) + 0.5) * IceField.LAYER_DEPTH
+			if y < 0.5:
 				continue
-			var i := grid.idx(x, y, z)
-			if grid.max_hp[i] <= 0.0 or used.has(Vector2i(x, z)):
+			var p := Vector3(x, y, z)
+			if grid.density_at(p) < 0.95 and not GameState.discovered[d] and grid.remaining == grid.total:
+				continue   # in a crevasse or a house (only checkable on a fresh glacier)
+			var crowded := false
+			for o in spots:
+				if (o as Vector3).distance_to(p) < 3.0:
+					crowded = true
+			for box in solids:
+				if (box as AABB).grow(0.8).has_point(p):
+					crowded = true
+			if crowded:
 				continue
-			cell = Vector3i(x, y, z)
-			used[Vector2i(x, z)] = true
+			spot = p
 			break
-		if cell.y < 0:
+		if spot == Vector3.INF:
 			push_warning("No spot for find %d" % d)
 			continue
+		spots.append(spot)
 		var marker := _make_find_marker(d)
-		marker.position = grid.cell_center(cell)
+		marker.position = spot
 		add_child(marker)
 		_find_markers[d] = marker
-		var idx := grid.idx(cell.x, cell.y, cell.z)
-		if GameState.discovered[d] or grid.hp[idx] <= 0.0:
-			# Found in an earlier session (or its block melted while we were away).
+		if GameState.discovered[d] or not grid.watch_find(spot, d):
+			# Found in an earlier session (or its ice melted while we were away).
 			_reveal_find(d, false)
 			if not GameState.discovered[d]:
 				GameState.discover(d)
-		else:
-			_find_cells[idx] = d
 
 
 func _make_find_marker(d: int) -> Label3D:
@@ -317,16 +373,21 @@ func _settle_finds(delta: float) -> void:
 
 
 func _floor_under(p: Vector3) -> float:
-	var floor_y := 0.0
-	var c := grid.world_to_cell(p)
-	for y in range(mini(c.y, grid.sy - 1), -1, -1):
-		if grid.solid(Vector3i(c.x, y, c.z)):
-			floor_y = grid.origin.y + float(y + 1) * Balance.BLOCK
-			break
-	for s in solids:
-		if p.x >= s.position.x and p.x <= s.end.x and p.z >= s.position.z and p.z <= s.end.z and s.end.y <= p.y + 0.4:
-			floor_y = maxf(floor_y, s.end.y)
+	var floor_y := grid.floor_below(p)
+	for box in solids:
+		var b := box as AABB
+		if p.x >= b.position.x and p.x <= b.end.x and p.z >= b.position.z and p.z <= b.end.z and b.end.y <= p.y + 0.4:
+			floor_y = maxf(floor_y, b.end.y)
 	return floor_y
+
+
+func _add_solid_shape(box: AABB) -> void:
+	var cs := CollisionShape3D.new()
+	var bs := BoxShape3D.new()
+	bs.size = box.size
+	cs.shape = bs
+	cs.position = box.get_center()
+	_world_body.add_child(cs)
 
 
 func _build_float_pool() -> void:
@@ -380,14 +441,15 @@ func _update_floats(delta: float) -> void:
 func _update_slow() -> void:
 	var melted := 1.0 - grid.fraction_left()
 	_ground_mat.albedo_color = _moraine.lerp(_grass, clampf(pow(melted, 0.6), 0.0, 1.0))
+	if _mountains != null:
+		(_mountains.material_override as ShaderMaterial).set_shader_parameter("foot_color", _ground_mat.albedo_color)
 	for f in _flowers:
 		var node: Label3D = f.node
 		if node.visible:
 			continue
 		var bloom := false
 		if f.inside:
-			var c := grid.world_to_cell(Vector3(f.x, 0.5, f.z))
-			bloom = grid.column_top_y(c.x, c.z) < 0 and melted > 0.02
+			bloom = melted > 0.02 and not grid.has_ice_at(f.x, f.z)
 		else:
 			bloom = melted >= f.threshold
 		if bloom:
@@ -444,7 +506,9 @@ func _mesh(mesh: Mesh, pos: Vector3, c: Color, parent: Node = self) -> MeshInsta
 	mi.mesh = mesh
 	mi.position = pos
 	mi.material_override = _mat(c)
-	mi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	# Only things near the playing area cast shadows (the shadow map covers ~70 m).
+	var near := Vector2(pos.x, pos.z - 0.0).length() < 45.0
+	mi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_ON if near else GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 	parent.add_child(mi)
 	return mi
 
@@ -466,21 +530,18 @@ func _cone(base: Vector3, radius: float, height: float, c: Color, segments: int 
 
 
 func _build_environment() -> void:
-	var sky_mat := ProceduralSkyMaterial.new()
-	sky_mat.sky_top_color = Color(0.28, 0.5, 0.85)
-	sky_mat.sky_horizon_color = Color(0.72, 0.83, 0.95)
-	sky_mat.ground_horizon_color = Color(0.72, 0.83, 0.95)
-	sky_mat.ground_bottom_color = Color(0.35, 0.4, 0.45)
-	var sky := Sky.new()
-	sky.sky_material = sky_mat
 	var env := Environment.new()
 	env.background_mode = Environment.BG_SKY
-	env.sky = sky
+	env.sky = Scenery.sky(int(level.seed))
 	env.ambient_light_source = Environment.AMBIENT_SOURCE_SKY
-	env.ambient_light_energy = 0.5
 	env.reflected_light_source = Environment.REFLECTION_SOURCE_SKY
-	env.tonemap_mode = Environment.TONE_MAPPER_FILMIC
-	env.tonemap_exposure = 1.0
+	env.tonemap_mode = Environment.TONE_MAPPER_ACES
+	env.tonemap_exposure = 0.72
+	env.tonemap_white = 2.2   # a gentle shoulder, so sunlit snow keeps its texture
+	env.ambient_light_energy = 0.65   # with a slightly softer sun: gentler shade on a phone screen
+	# A quarter of the fill light is neutral, so shade isn't deep blue.
+	env.ambient_light_sky_contribution = 0.75
+	env.ambient_light_color = Color(0.62, 0.64, 0.68)
 	env.fog_enabled = true
 	env.fog_light_color = Color(0.74, 0.84, 0.95)
 	env.fog_density = 0.0035
@@ -489,11 +550,19 @@ func _build_environment() -> void:
 	we.environment = env
 	add_child(we)
 
+	# Low afternoon sun from the right, so the glacier's shape reads in light
+	# and shadow (from straight behind the camera everything looks flat).
 	var sun := DirectionalLight3D.new()
-	sun.rotation_degrees = Vector3(-58.0, -35.0, 0.0)
-	sun.light_energy = 1.0
-	sun.light_color = Color(1.0, 0.97, 0.92)
-	sun.shadow_enabled = false
+	sun.transform.basis = Basis.looking_at(Vector3(-0.58, -0.6, -0.55).normalized(), Vector3.UP)
+	sun.light_energy = 0.85
+	sun.light_color = Color(1.0, 0.95, 0.88)
+	sun.shadow_enabled = true
+	sun.directional_shadow_mode = DirectionalLight3D.SHADOW_PARALLEL_2_SPLITS
+	sun.directional_shadow_max_distance = 70.0
+	sun.directional_shadow_split_1 = 0.25
+	sun.shadow_bias = 0.04
+	sun.shadow_normal_bias = 1.2
+	sun.shadow_blur = 1.5
 	add_child(sun)
 
 
@@ -519,65 +588,36 @@ func _build_ground() -> void:
 	var ground := MeshInstance3D.new()
 	ground.mesh = pm
 	ground.material_override = _ground_mat
+	ground.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 	add_child(ground)
 
-	# A meltwater lake past the glacier's tongue.
-	var lake_mesh := PlaneMesh.new()
-	lake_mesh.size = Vector2(150, 60)
-	var lake := MeshInstance3D.new()
-	lake.mesh = lake_mesh
-	lake.position = Vector3(0, 0.06, 58)
-	var water := StandardMaterial3D.new()
-	water.albedo_color = Color(0.22, 0.48, 0.72)
-	water.roughness = 0.08
-	water.metallic = 0.3
-	lake.material_override = water
-	add_child(lake)
+	# The meltwater lake past the glacier's tongue, and the stream that feeds it.
+	add_child(Scenery.lake(level))
+	var stream := Scenery.stream(level)
+	if stream != null:
+		add_child(stream)
 
 	# A few boulders for scale.
-	var rock := SphereMesh.new()
-	rock.radius = 0.6
-	rock.height = 0.8
-	rock.radial_segments = 7
-	rock.rings = 4
-	for p in [Vector3(-14, 0.2, 13), Vector3(-6, 0.2, 18), Vector3(15, 0.2, 7), Vector3(-19, 0.2, 2),
-			Vector3(18, 0.2, -6), Vector3(4, 0.2, 19)]:
-		var r := _mesh(rock, p, Color(0.45, 0.45, 0.48))
-		r.scale = Vector3.ONE * _rng.randf_range(0.8, 1.6)
+	var spots := [Vector3(-14, 0, 13), Vector3(-5, 0, 19), Vector3(15, 0, 7), Vector3(-19, 0, 2),
+			Vector3(18, 0, -6), Vector3(4, 0, 19.5), Vector3(-20, 0, 9), Vector3(19.5, 0, 15)]
+	for i in spots.size():
+		var p: Vector3 = spots[i]
+		var r := MeshInstance3D.new()
+		r.mesh = Scenery.boulder_mesh(i % 4)
+		r.material_override = Scenery.rock_material(0.25)
+		r.position = p
+		var sc := _rng.randf_range(1.0, 1.9)
+		r.scale = Vector3.ONE * sc
 		r.rotation.y = _rng.randf() * TAU
-		solids.append(AABB(p - Vector3(0.5, 0.2, 0.5) * r.scale.x, Vector3(1.0, 0.7, 1.0) * r.scale.x))
+		add_child(r)
+		solids.append(AABB(p - Vector3(0.45, 0.0, 0.45) * sc, Vector3(0.9, 0.42, 0.9) * sc))
 
 
 func _build_mountains() -> void:
-	var rock := Color(0.44, 0.44, 0.49)
-	var snow := Color(0.95, 0.97, 1.0)
-	var volcano_spot := HelperSwarm.VOLCANO_POS * Vector3(1, 0, 1)
-	var peaks := []
-	# Valley walls on both sides and at the back, close enough to feel big.
-	for i in 9:
-		var z := -46.0 + i * 9.0
-		for side in [-1.0, 1.0]:
-			var r := _rng.randf_range(11.0, 16.0)
-			peaks.append([Vector3(side * (22.5 + r), 0, z + _rng.randf_range(-3, 3)), r, _rng.randf_range(18, 34)])
-	for i in 6:
-		var r := _rng.randf_range(12.0, 17.0)
-		peaks.append([Vector3(-30.0 + i * 12.0, 0, -28.5 - r), r, _rng.randf_range(24, 40)])
-	# A distant ring of peaks for the horizon.
-	for i in 22:
-		var a := TAU * float(i) / 22.0 + _rng.randf_range(-0.08, 0.08)
-		var dist := _rng.randf_range(115.0, 150.0)
-		peaks.append([Vector3(sin(a) * dist, 0, cos(a) * dist), _rng.randf_range(25.0, 40.0), _rng.randf_range(40, 75)])
-	for pk in peaks:
-		var base: Vector3 = pk[0]
-		if base.distance_to(volcano_spot) < 15.0:
-			continue   # leave room for Kevin
-		var r: float = pk[1]
-		var h: float = pk[2]
-		var segs := _rng.randi_range(6, 9)
-		var m := _cone(base, r, h, rock, segs)
-		m.rotation.y = _rng.randf() * TAU
-		var cap := _cone(base + Vector3(0, h * 0.62, 0), r * 0.38 + 0.15, h * 0.38 + 0.1, snow, segs)
-		cap.rotation.y = m.rotation.y
+	# One heightfield all the way round, with a hollow for Kevin the volcano.
+	var kevin := Vector2(HelperSwarm.VOLCANO_POS.x, HelperSwarm.VOLCANO_POS.z)
+	_mountains = Scenery.mountains(level, kevin, IceField.detail_texture(int(level.seed)))
+	add_child(_mountains)
 
 
 func _build_village() -> Array:
@@ -704,27 +744,35 @@ func _build_shed() -> void:
 
 
 func _build_trees() -> void:
-	var spots := []
-	for i in 26:
+	# Pines along both sides of the valley near the shed, and a forest further
+	# out toward the lake.
+	var near := []
+	var far := []
+	var v: Dictionary = level.valley
+	for i in 120:
 		var side := -1.0 if i % 2 == 0 else 1.0
-		var x := side * _rng.randf_range(13.0, 21.0)
-		var z := _rng.randf_range(7.0, 34.0)
-		if Vector2(x - SHED_POS.x, z - SHED_POS.z).length() < 4.5:
+		var x: float
+		var z: float
+		if i < 30:
+			x = side * _rng.randf_range(13.0, 21.5)
+			z = _rng.randf_range(6.0, 30.0)
+		else:
+			z = _rng.randf_range(20.0, 62.0)
+			var hw: float = v.half_width + maxf(0.0, z - v.flare_z) * v.flare
+			x = side * _rng.randf_range(12.0, hw - 1.0)
+		if Vector2(x - SHED_POS.x, z - SHED_POS.z).length() < 4.5 or Scenery.on_lake(level, x, z, 2.0) \
+				or Scenery.near_stream(level, x, z, 2.0) or Vector2(x - SPAWN.x, z - SPAWN.z).length() < 4.0:
 			continue
-		spots.append(Vector3(x, 0, z))
-	for p in spots:
-		var s := _rng.randf_range(0.8, 1.4)
-		var trunk := CylinderMesh.new()
-		trunk.top_radius = 0.12 * s
-		trunk.bottom_radius = 0.18 * s
-		trunk.height = 1.0 * s
-		trunk.radial_segments = 6
-		_mesh(trunk, p + Vector3(0, 0.5 * s, 0), Color(0.4, 0.27, 0.17))
-		var green := Color(0.16, 0.36, 0.22).lightened(_rng.randf_range(0.0, 0.12))
-		for k in 3:
-			_cone(p + Vector3(0, (0.7 + k * 0.75) * s, 0), (1.25 - k * 0.3) * s, 1.4 * s, green, 7)
-		if p.z < 20.0:
-			solids.append(AABB(p - Vector3(0.3, 0, 0.3), Vector3(0.6, 3.5 * s, 0.6)))
+		var s := _rng.randf_range(0.8, 1.4) if i < 30 else _rng.randf_range(0.9, 1.7)
+		var spot := [Vector3(x, 0, z), s, _rng.randf() * TAU]
+		if z < 26.0:
+			near.append(spot)
+			if z < 20.0:
+				solids.append(AABB(Vector3(x - 0.3, 0, z - 0.3), Vector3(0.6, 4.0 * s, 0.6)))
+		else:
+			far.append(spot)
+	add_child(Scenery.forest(near, true))
+	add_child(Scenery.forest(far, false))
 
 
 func _build_flowers() -> void:

@@ -48,26 +48,33 @@ func _run() -> void:
 	await _frames(2)
 	await _shot("01b_spawn_touch")
 	hud.set_touch_mode(OS.get_cmdline_user_args().has("touch"))
+	# Turn round: the lake and the stream.
+	player.set_view(PI + 0.35, -0.08)
+	await _frames(5)
+	await _shot("01c_lake")
+	player.set_view(world.SPAWN_YAW, -0.12)
 
-	# Walk up to the ice front and melt for a while.
-	var col := Vector2i(grid.sx / 2, -1)
-	for z in range(grid.sz - 1, -1, -1):
-		if grid.column_top_y(col.x, z) >= 2:
-			col.y = z
-			break
-	var tgt: Vector3 = grid.cell_center(Vector3i(col.x, 1, col.y))
-	player.position = Vector3(tgt.x + 0.5, 0.0, tgt.z + 3.2)
+	# Walk up to the front of the glacier (where it's about chest high) and melt for a while.
+	var front_z := 4.0
+	while front_z > -10.0 and grid.surface_y(1.0, front_z) < 1.3:
+		front_z -= 0.1
+	var tgt := Vector3(1.0, 1.0, front_z - 0.8)
+	player.position = Vector3(1.4, 0.0, front_z + 2.6)
 	player.unstick()
 	_aim_at(player, tgt)
+	await _frames(5)
+	await _shot("02a_ice_front")
 	world.force_melt = true
-	gs.debug_speed = 4.0
-	await _frames(90)
+	gs.debug_speed = 3.0
+	await _frames(150)
 	await _shot("02_melting")
 	world.force_melt = false
 	gs.debug_speed = 1.0
+	await _frames(20)
+	await _shot("02b_hole")
 
 	# Stand on top of the glacier, looking at the church spire.
-	player.position = Vector3(-6.0, 8.0, -4.0)
+	player.position = Vector3(-6.0, grid.surface_y(-6.0, -4.0) + 0.1, -4.0)
 	player.unstick()
 	_aim_at(player, Vector3(1.0, 8.0, -11.0))
 	await _frames(10)
@@ -77,13 +84,42 @@ func _run() -> void:
 	gs.grant_water(1e7)
 	for _i in 6:
 		gs.buy_helper(0)
-	gs.buy_helper(1)
+	for _i in 3:
+		gs.buy_helper(1)
 	gs.buy_helper(2)
 	player.position = Vector3(-15.0, 0.0, 12.0)
 	player.unstick()
 	_aim_at(player, Vector3(-4.0, 3.0, -8.0))
 	await _frames(120)
 	await _shot("04_helpers")
+	# Close-ups of a penguin and a sauna crew member.
+	# Freeze the helpers and pose one of each on a flat bit of untouched
+	# glacier, facing the camera.
+	world.helpers.set_process(false)
+	for w in world.helpers._walkers:
+		var node: Node3D = w.node
+		var spot := Vector3(-7.0 if w.type == 0 else 7.0, 0.0, -15.0)
+		spot.y = grid.surface_y(spot.x, spot.z)
+		node.global_position = spot
+		node.rotation = Vector3(0.0, 0.0, 0.0)   # faces -Z; the camera stands on that side
+		var eye := spot + Vector3(0.5, 1.05 if w.type == 0 else 1.35, -2.3 if w.type == 0 else -2.4)
+		eye.y = maxf(eye.y, grid.surface_y(eye.x, eye.z) + 0.5)
+		player.position = eye - Vector3(0, 1.55, 0)
+		player.velocity = Vector3.ZERO
+		player.set_physics_process(false)
+		_aim_at(player, spot + Vector3(0, 0.4 if w.type == 0 else 0.85, 0))
+		await _frames(3)
+		await _shot("04b_penguin" if w.type == 0 else "04c_sauna")
+		if w.type == 1:
+			break
+	world.helpers.set_process(true)
+	player.set_physics_process(true)
+	# Kevin, seen from the back corner of the valley.
+	player.position = Vector3(-16.0, 9.0, -20.0)
+	player.velocity = Vector3.ZERO
+	_aim_at(player, Vector3(-27.0, 7.0, -38.0))
+	await _frames(3)
+	await _shot("04d_kevin")
 
 	# The shed.
 	player.position = Vector3(5.5, 0.0, 11.5)
@@ -100,10 +136,14 @@ func _run() -> void:
 	hud.close_shed()
 
 	# Halfway: melt the top half of the glacier.
-	for c in grid.total_blocks:
-		var i: int = grid.inst_cell[c]
-		if grid.cell_of(i).y >= 4 and grid.hp[i] > 0.0:
-			grid.damage_cell(grid.cell_of(i), 1e9)
+	for i in grid.f.size():
+		if grid.f[i] > 0.0 and grid.point_pos(i).y > 3.6:
+			grid.f[i] = 0.0
+	grid._count()
+	grid._update_col_top(0, grid.nx - 1, 0, grid.nz - 1)
+	for ci in grid._chunks.size():
+		grid._dirty[ci] = true
+	grid.flush()
 	player.position = Vector3(0.0, 0.0, 12.0)
 	player.unstick()
 	_aim_at(player, Vector3(0.0, 2.0, -14.0))

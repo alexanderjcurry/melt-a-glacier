@@ -1,6 +1,6 @@
 extends Node
 ## Autoload "GameState": meltwater, tools, upgrades, helpers, finds, and saving.
-## The glacier itself lives in IceGrid; its state is saved through here.
+## The glacier itself lives in IceField; its state is saved through here.
 
 signal changed                                   # anything changed; UI should refresh
 signal discovered_item(index: int, value: float)
@@ -8,7 +8,7 @@ signal won
 signal offline_earned(result: Dictionary)        # {seconds, blocks, water, capped}
 
 const SAVE_PATH := "user://save3d.json"
-const SAVE_VERSION := 2
+const SAVE_VERSION := 3            # 3 = smooth ice. Older saves start a fresh glacier.
 const AUTOSAVE_INTERVAL := 10.0
 
 # --- Saved state ----------------------------------------------------------------
@@ -18,7 +18,7 @@ var tool_index: int = 0
 var upgrade_levels: Dictionary = {}    # key -> level
 var helper_counts: Array = []          # index -> owned
 var discovered: Array = []             # index -> bool
-var blocks_melted: int = 0
+var blocks_melted: int = 0              # grid points of ice melted (8 per cubic metre)
 var boost_until: float = 0.0
 var owns_remove_ads_2x: bool = false   # IAP
 var owns_golden_dryer: bool = false    # IAP (cosmetic)
@@ -29,11 +29,11 @@ var last_active_time: float = 0.0
 var player_pos: Vector3 = Vector3.INF  # INF = use the spawn point
 var player_yaw: float = 0.0
 var player_pitch: float = -0.15
-var glacier_data: String = ""          # IceGrid.to_save_string()
+var glacier_data: String = ""          # IceField.to_save_string()
 var tutorial_step: int = 0             # onboarding hints (World._update_coach)
 
 # --- Runtime only -------------------------------------------------------------------
-var grid: IceGrid                      # set by the world when it's built
+var grid: IceField                     # set by the world when it's built
 var player: Node3D
 var debug_speed: float = 1.0           # dev menu multiplier
 var _autosave_timer: float = 0.0
@@ -154,7 +154,12 @@ func total_helper_power() -> float:
 
 
 func block_value(layer: int) -> float:
+	## Meltwater for a cubic metre of this layer.
 	return Balance.layer_hp(layer) * sell_mult()
+
+
+func melted_cubic_metres() -> float:
+	return float(blocks_melted) * IceField.POINT_VOLUME
 
 
 func is_boost_active() -> bool:
@@ -166,9 +171,10 @@ func boost_seconds_left() -> float:
 
 
 # --- Earning ------------------------------------------------------------------------------
-func on_block_melted(layer: int) -> float:
-	var v := block_value(layer)
-	blocks_melted += 1
+func on_ice_melted(points: int, hp: float) -> float:
+	## `points` bits of ice (1/8 m3 each) just melted; `hp` is their layers' hp added up.
+	var v := hp * sell_mult() * IceField.POINT_VOLUME
+	blocks_melted += points
 	water += v
 	lifetime_water += v
 	changed.emit()
@@ -350,6 +356,11 @@ func load_game() -> void:
 	if typeof(data) != TYPE_DICTIONARY:
 		push_warning("Save file unreadable, starting fresh.")
 		return
+	owns_remove_ads_2x = bool(data.get("owns_remove_ads_2x", false))
+	owns_golden_dryer = bool(data.get("owns_golden_dryer", false))
+	golden_equipped = bool(data.get("golden_equipped", false)) and owns_golden_dryer
+	if int(data.get("version", 0)) < 3:
+		return   # the old blocky glacier: start the smooth one fresh, keep purchases
 	water = float(data.get("water", 0.0))
 	lifetime_water = float(data.get("lifetime_water", 0.0))
 	tool_index = clampi(int(data.get("tool_index", 0)), 0, Balance.TOOLS.size() - 1)
@@ -364,9 +375,6 @@ func load_game() -> void:
 		discovered[i] = bool(dc[i]) if i < dc.size() else false
 	blocks_melted = int(data.get("blocks_melted", 0))
 	boost_until = float(data.get("boost_until", 0.0))
-	owns_remove_ads_2x = bool(data.get("owns_remove_ads_2x", false))
-	owns_golden_dryer = bool(data.get("owns_golden_dryer", false))
-	golden_equipped = bool(data.get("golden_equipped", false)) and owns_golden_dryer
 	play_time = float(data.get("play_time", 0.0))
 	has_won = bool(data.get("has_won", false))
 	last_active_time = float(data.get("last_active_time", now()))

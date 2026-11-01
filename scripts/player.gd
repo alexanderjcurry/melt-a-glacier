@@ -1,17 +1,18 @@
 class_name Player
-extends Node3D
-## First-person walker with simple voxel collision (no physics engine), plus the
-## heat tool: aim with the crosshair, hold to melt what you're looking at.
+extends CharacterBody3D
+## First-person walker: a capsule on Godot's physics, so it slides smoothly
+## over the carved ice. Hold JUMP to fly with the jetpack. Carries the heat
+## tool: aim with the crosshair, hold to melt what you're looking at.
 
 const RADIUS := 0.3
 const HEIGHT := 1.7
 const EYE := 1.55
-const STEP_UP := 1.05
-const AIR_STEP_UP := 0.8      # at the top of a jump you can pull yourself up a 2-block wall
 const GRAVITY := 18.0
+const STEP_HEIGHT := 0.5      # walks up ledges this high without jumping
+const WORLD_LAYER := 1        # ground, houses, the shed, rocks, trees
+const ICE_LAYER := 2
 
-var grid: IceGrid
-var solids: Array[AABB] = []        # houses, the shed: things you can't walk through
+var grid: IceField
 var bounds_min := Vector3(-21.0, -1.0, -27.0)
 var bounds_max := Vector3(21.0, 80.0, 20.0)
 
@@ -21,17 +22,18 @@ var melting := false
 var jet_held := false               # JUMP held down: the jetpack fires in the air
 var input_enabled := true
 
-var velocity := Vector3.ZERO
 var on_floor := false
 var fuel := 1.0                     # jetpack tank, 0..1
 var jetting := false
 var yaw := 0.0
 var pitch := -0.15
 var camera: Camera3D
-var target: Dictionary = {"hit": false}   # what the crosshair points at
+var target: Dictionary = {"hit": false}   # what the crosshair points at: {hit, pos, normal, dist}
+var heat := 0.0                     # 0..1, how hard the tool is working (the ice glows)
 
+var _shape: CollisionShape3D
 var _head: Node3D
-var _cam_offset_y := 0.0            # eases the camera after stepping up a block
+var _cam_offset_y := 0.0            # eases the camera after stepping up a ledge
 var _bob_t := 0.0
 var _tool_holder: Node3D
 var _tool_model: Node3D
@@ -39,12 +41,28 @@ var _shown_tool := -1
 var _shown_gold := false
 var _flame: CPUParticles3D
 var _steam: CPUParticles3D
+var _drips: CPUParticles3D
 var _jet: CPUParticles3D
 var _kick := 0.0
 var _hold_t := 0.0
+var _heat_pos := Vector3(0, -100, 0)
 
 
 func _ready() -> void:
+	collision_layer = 4
+	collision_mask = WORLD_LAYER | ICE_LAYER
+	floor_max_angle = deg_to_rad(50.0)
+	floor_snap_length = 0.35
+	floor_constant_speed = true
+	safe_margin = 0.02
+	var capsule := CapsuleShape3D.new()
+	capsule.radius = RADIUS
+	capsule.height = HEIGHT
+	_shape = CollisionShape3D.new()
+	_shape.shape = capsule
+	_shape.position = Vector3(0, HEIGHT * 0.5, 0)
+	add_child(_shape)
+
 	_head = Node3D.new()
 	_head.position = Vector3(0, EYE, 0)
 	add_child(_head)
@@ -82,6 +100,20 @@ func _ready() -> void:
 	_steam.local_coords = false
 	add_child(_steam)
 	_steam.top_level = true
+
+	# Meltwater dripping off where the heat lands.
+	_drips = _make_particles(Color(0.75, 0.9, 1.0, 0.9), Color(0.6, 0.85, 1.0, 0.0), 0.07, 24)
+	_drips.direction = Vector3(0, -1, 0)
+	_drips.spread = 25.0
+	_drips.gravity = Vector3(0, -9.0, 0)
+	_drips.initial_velocity_min = 0.2
+	_drips.initial_velocity_max = 1.0
+	_drips.lifetime = 0.7
+	_drips.emission_shape = CPUParticles3D.EMISSION_SHAPE_SPHERE
+	_drips.emission_sphere_radius = 0.4
+	_drips.local_coords = false
+	add_child(_drips)
+	_drips.top_level = true
 
 	_jet = _make_particles(Color(1.0, 0.75, 0.35, 0.9), Color(0.7, 0.7, 0.75, 0.0), 0.3, 40)
 	_jet.direction = Vector3(0, -1, 0)
@@ -139,6 +171,11 @@ func set_view(p_yaw: float, p_pitch: float) -> void:
 		_head.rotation.x = pitch
 
 
+func aim_dir() -> Vector3:
+	return -camera.global_transform.basis.z
+
+
+# --- Moving -----------------------------------------------------------------------------
 func jump() -> void:
 	if on_floor and input_enabled:
 		velocity.y = Balance.JUMP_VELOCITY
@@ -151,6 +188,83 @@ func respawn(at: Vector3, p_yaw: float) -> void:
 	fuel = 1.0
 	set_view(p_yaw, -0.12)
 	unstick()
+
+
+func _physics_process(delta: float) -> void:
+	_move(delta)
+	_update_tool(delta)
+
+
+func _process(delta: float) -> void:
+	_animate_camera(minf(delta, 0.05))
+
+
+func _move(delta: float) -> void:
+	var speed := Balance.WALK_SPEED * GameState.move_speed_mult()
+	var turn := Basis(Vector3.UP, yaw)
+	var mv := move_input.limit_length(1.0) if input_enabled else Vector2.ZERO
+	var wish := turn * Vector3(mv.x, 0.0, -mv.y) * speed
+	velocity.x = wish.x
+	velocity.z = wish.z
+	if not on_floor:
+		velocity.y -= GRAVITY * delta
+	_update_jetpack(delta)
+	if on_floor and mv.length() > 0.1 and _step_up(Vector3(wish.x, 0.0, wish.z) * delta):
+		velocity.x = 0.0
+		velocity.z = 0.0
+	_slide(delta)
+	velocity.x = wish.x
+	velocity.z = wish.z
+	on_floor = is_on_floor()
+	if on_floor and velocity.y < 0.0:
+		velocity.y = 0.0
+	# Stay in the valley.
+	var p := position
+	p.x = clampf(p.x, bounds_min.x + RADIUS, bounds_max.x - RADIUS)
+	p.z = clampf(p.z, bounds_min.z + RADIUS, bounds_max.z - RADIUS)
+	if p.y < -1.0:
+		p.y = 0.05   # fell through something somehow: back onto the ground
+		velocity = Vector3.ZERO
+	position = p
+	if on_floor and mv.length() > 0.1:
+		_bob_t += delta * speed * 2.2
+
+
+func _slide(delta: float) -> void:
+	## move_and_slide() for exactly `delta` seconds. Godot uses the frame's own
+	## delta, which only matches when we're called from _physics_process.
+	var engine_dt := get_physics_process_delta_time() if Engine.is_in_physics_frame() else get_process_delta_time()
+	if engine_dt <= 0.0 or absf(engine_dt - delta) < 0.00001:
+		move_and_slide()
+		return
+	var k := delta / engine_dt
+	velocity *= k
+	move_and_slide()
+	velocity /= k
+
+
+func _step_up(motion: Vector3) -> bool:
+	## Walking into a low ledge: hop up onto it instead of stopping.
+	var col := KinematicCollision3D.new()
+	if not test_move(global_transform, motion, col):
+		return false
+	if col.get_normal().y > 0.65:
+		return false   # just a slope; move_and_slide walks up those
+	var up := Vector3(0, STEP_HEIGHT, 0)
+	if test_move(global_transform, up):
+		return false   # no headroom
+	var raised := global_transform.translated(up)
+	if test_move(raised, motion):
+		return false   # too tall to step onto
+	var down := KinematicCollision3D.new()
+	if not test_move(raised.translated(motion), -up, down):
+		return false   # nothing to stand on
+	var rise := STEP_HEIGHT - down.get_travel().length()
+	if rise <= 0.03:
+		return false
+	global_position += motion + Vector3(0, rise + 0.01, 0)
+	_cam_offset_y -= rise
+	return true
 
 
 func _update_jetpack(delta: float) -> void:
@@ -169,97 +283,32 @@ func _update_jetpack(delta: float) -> void:
 	_jet.emitting = jetting
 
 
-func aim_dir() -> Vector3:
-	return -camera.global_transform.basis.z
-
-
-# --- Frame update ------------------------------------------------------------------------
-func _process(delta: float) -> void:
-	delta = minf(delta, 0.05)
-	_move(delta)
-	_animate_camera(delta)
-	_update_tool(delta)
-
-
-func _move(delta: float) -> void:
-	var speed := Balance.WALK_SPEED * GameState.move_speed_mult()
-	var turn := Basis(Vector3.UP, yaw)
-	var fwd := turn * Vector3(0, 0, -1)
-	var right := turn * Vector3(1, 0, 0)
-	var mv := move_input.limit_length(1.0) if input_enabled else Vector2.ZERO
-	var wish := (fwd * mv.y + right * mv.x) * speed
-	velocity.x = wish.x
-	velocity.z = wish.z
-	velocity.y -= GRAVITY * delta
-	_update_jetpack(delta)
-	_move_horizontal(Vector3(velocity.x * delta, 0.0, 0.0))
-	_move_horizontal(Vector3(0.0, 0.0, velocity.z * delta))
-	_move_vertical(velocity.y * delta)
-	if on_floor and mv.length() > 0.1:
-		_bob_t += delta * speed * 2.2
-
-
-func _move_horizontal(d: Vector3) -> void:
-	if d.length_squared() == 0.0:
-		return
-	var np := position + d
-	if not collides(np):
-		position = np
-		return
-	# Auto-climb up to one block, like walking up stairs (a bit less mid-jump).
-	var lifts := [0.35, 0.7, STEP_UP] if on_floor else [0.3, 0.55, AIR_STEP_UP]
-	for h in lifts:
-		var lift := Vector3(0.0, h, 0.0)
-		if not collides(np + lift) and not collides(position + lift):
-			position = np + lift
-			_cam_offset_y -= h
-			return
-
-
-func _move_vertical(dy: float) -> void:
-	var np := position + Vector3(0.0, dy, 0.0)
-	if np.y <= 0.0:
-		np.y = 0.0
-		position = np
-		velocity.y = 0.0
-		on_floor = true
-		return
-	if collides(np):
-		if dy < 0.0:
-			var y := np.y
-			for _k in 30:
-				y += 0.05
-				if not collides(Vector3(np.x, y, np.z)):
-					break
-			position.y = y
-			on_floor = true
-		velocity.y = 0.0
-		return
-	position = np
-	on_floor = false
-
-
 func collides(p: Vector3) -> bool:
+	## Would the player's body overlap anything standing at p?
 	if p.x - RADIUS < bounds_min.x or p.x + RADIUS > bounds_max.x \
 			or p.z - RADIUS < bounds_min.z or p.z + RADIUS > bounds_max.z:
 		return true
-	var mn := Vector3(p.x - RADIUS, p.y + 0.001, p.z - RADIUS)
-	var mx := Vector3(p.x + RADIUS, p.y + HEIGHT, p.z + RADIUS)
-	if grid != null and grid.box_hits_ice(mn, mx):
-		return true
-	var box := AABB(mn, mx - mn)
-	for s in solids:
-		if s.intersects(box):
-			return true
-	return false
+	if grid != null:
+		for h in [0.3, 0.85, 1.4]:
+			if grid.solid_at(p + Vector3(0, h, 0)):
+				return true
+	if not is_inside_tree():
+		return false
+	var q := PhysicsShapeQueryParameters3D.new()
+	q.shape = _shape.shape
+	q.transform = Transform3D(Basis(), p + Vector3(0, HEIGHT * 0.5 + 0.06, 0))
+	q.collision_mask = WORLD_LAYER | ICE_LAYER
+	q.exclude = [get_rid()]
+	return not get_world_3d().direct_space_state.intersect_shape(q, 1).is_empty()
 
 
 func unstick() -> void:
-	## If melting physics ever leaves us inside something, pop up on top.
+	## If melting or loading ever leaves us inside something, pop up on top.
 	var guard := 0
-	while collides(position) and guard < 200:
+	while collides(position) and guard < 120:
 		position.y += 0.25
 		guard += 1
+	on_floor = false
 
 
 func _animate_camera(delta: float) -> void:
@@ -271,13 +320,24 @@ func _animate_camera(delta: float) -> void:
 
 
 # --- The tool -------------------------------------------------------------------------------
+func ray(dist: float) -> Dictionary:
+	## What's straight ahead of the crosshair, if it's ice: {hit, pos, normal, dist}.
+	if camera == null or not is_inside_tree() or grid == null:
+		return {"hit": false}
+	var from := camera.global_position
+	var q := PhysicsRayQueryParameters3D.create(from, from + aim_dir() * dist, WORLD_LAYER | ICE_LAYER, [get_rid()])
+	var hit := get_world_3d().direct_space_state.intersect_ray(q)
+	if hit.is_empty() or hit.collider != grid.body:
+		return {"hit": false}
+	var p: Vector3 = hit.position
+	return {"hit": true, "pos": p, "normal": hit.normal, "dist": from.distance_to(p)}
+
+
 func _update_tool(delta: float) -> void:
 	if _shown_tool != GameState.tool_index or _shown_gold != GameState.golden_equipped:
 		_build_tool_model()
 	var reach := GameState.tool_range()
-	target = grid.raycast(camera.global_position, aim_dir(), reach) if grid != null else {"hit": false}
-	if target.hit and _blocked_by_solid(camera.global_position, target.pos):
-		target = {"hit": false}   # a house (or the shed) is in the way
+	target = ray(reach)
 	var active := melting and input_enabled and not GameState.has_won
 	_flame.emitting = active
 	if active:
@@ -287,21 +347,18 @@ func _update_tool(delta: float) -> void:
 		if _flame.global_position.distance_to(aim_point) > 0.3:
 			_flame.look_at(aim_point)
 		_kick = 0.02 + randf() * 0.015
-	if active and target.hit:
+	var working: bool = active and target.hit
+	if working:
 		var normal: Vector3 = target.normal
-		var center: Vector3 = target.pos - normal * 0.3
-		grid.damage_sphere(center, GameState.tool_radius(), GameState.tool_power() * delta, target.index)
+		grid.damage_sphere(target.pos - normal * 0.2, GameState.tool_radius(), GameState.tool_power() * delta)
 		_steam.global_position = target.pos + normal * 0.2
-		_steam.emitting = true
-	else:
-		_steam.emitting = false
-
-
-func _blocked_by_solid(from: Vector3, to: Vector3) -> bool:
-	for s in solids:
-		if s.intersects_segment(from, to) != null:
-			return true
-	return false
+		_drips.global_position = target.pos + normal * 0.1
+		_heat_pos = target.pos
+	_steam.emitting = working
+	_drips.emitting = working
+	heat = move_toward(heat, 1.0 if working else 0.0, delta * (5.0 if working else 2.0))
+	if grid != null:
+		grid.set_heat(_heat_pos, heat)
 
 
 func _build_tool_model() -> void:

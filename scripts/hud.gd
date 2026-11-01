@@ -8,7 +8,7 @@ const TABS = ["Tools", "Upgrades", "Helpers", "Finds", "Shop"]
 signal respawn_requested
 
 var player: Player
-var grid: IceGrid
+var grid: IceField
 var touch: TouchControls
 var touch_mode := false
 var near_shed := false
@@ -49,7 +49,7 @@ var _ending_shown := false
 class Crosshair:
 	extends Control
 	var hit := false
-	var frac := 1.0
+	var spin := 0.0
 	var hot := false
 	var far := false
 
@@ -61,9 +61,10 @@ class Crosshair:
 		draw_arc(c, 11.0, 0, TAU, 32, Color(0, 0, 0, 0.5), 5.0)
 		draw_arc(c, 11.0, 0, TAU, 32, col, 2.5)
 		draw_circle(c, 2.5, col)
-		if hit and frac < 0.999:
-			var ring := Color(1.0, 0.55, 0.15) if hot else Color(1.0, 0.8, 0.4)
-			draw_arc(c, 19.0, -PI / 2.0, -PI / 2.0 + TAU * frac, 40, ring, 4.0)
+		if hit and hot:
+			var ring := Color(1.0, 0.55, 0.15)
+			draw_arc(c, 19.0, spin, spin + PI * 0.75, 20, ring, 4.0)
+			draw_arc(c, 19.0, spin + PI, spin + PI * 1.75, 20, ring, 4.0)
 
 
 func _ready() -> void:
@@ -321,8 +322,7 @@ func _process(delta: float) -> void:
 	var t: Dictionary = player.target
 	crosshair.hit = t.hit
 	crosshair.hot = player.melting
-	if t.hit:
-		crosshair.frac = grid.hp_fraction(t.cell)
+	crosshair.spin = fmod(crosshair.spin + delta * 7.0, TAU)
 	crosshair.far = _too_far and not t.hit
 	crosshair.queue_redraw()
 	fuel_bar.visible = not touch_mode and player.fuel < 0.999 and not shed_open
@@ -332,7 +332,7 @@ func _process(delta: float) -> void:
 		_far_check_timer = 0.0
 		_too_far = false
 		if not t.hit and grid != null:
-			_too_far = grid.raycast(player.camera.global_position, player.aim_dir(), 80.0).hit
+			_too_far = player.ray(80.0).hit
 	_refresh_timer += delta
 	if _refresh_timer >= 0.15:
 		_refresh_timer = 0.0
@@ -348,11 +348,11 @@ func _refresh() -> void:
 	if GameState.has_won:
 		ice_label.text = "The glacier is gone. Summer is back! ☀️"
 	else:
-		ice_label.text = "Glacier melted: %d%%  ·  %s blocks left" % [int(floor((1.0 - left) * 100.0)), Fmt.num(float(grid.remaining))]
+		ice_label.text = "Glacier melted: %d%%  ·  %s m³ of ice left" % [int(floor((1.0 - left) * 100.0)), Fmt.num(grid.volume_left())]
 	var t: Dictionary = player.target
 	if t.hit:
-		var l := grid.layer_at(t.cell)
-		target_label.text = "%s  ·  +%s 💧" % [Balance.LAYERS[l].name, Fmt.num(GameState.block_value(l))]
+		var l := grid.layer_at(t.pos - t.normal * 0.3)
+		target_label.text = "%s  ·  💧%s per m³" % [Balance.LAYERS[l].name, Fmt.num(GameState.block_value(l))]
 	elif _too_far:
 		target_label.text = "Too far away. Walk closer"
 	else:
@@ -730,8 +730,8 @@ func _close_popup(p: Dictionary) -> void:
 
 func show_offline(result: Dictionary) -> void:
 	var water: float = result.water
-	var body := "While you were away for %s, your helpers melted %s blocks of ice.\n\nYou earned 💧%s" % [
-		Fmt.duration(result.seconds), Fmt.num(float(result.blocks)), Fmt.num(water)]
+	var body := "While you were away for %s, your helpers melted %s m³ of ice.\n\nYou earned 💧%s" % [
+		Fmt.duration(result.seconds), Fmt.num(float(result.blocks) * IceField.POINT_VOLUME), Fmt.num(water)]
 	if result.get("capped", false):
 		body += "\n(Away time counts for up to %d hours.)" % int(Balance.OFFLINE_CAP_SECONDS / 3600.0)
 	var p := _popup("Welcome back!", body)
@@ -754,8 +754,8 @@ func show_ending() -> void:
 	for d in GameState.discovered:
 		if d:
 			found += 1
-	var body := "The last chunk dripped away and the village is free.\nSummer is back!\n\n⏱ %s played\n🧊 %s blocks melted\n💧 %s meltwater earned\n🏺 %d/%d finds\n\n(Screenshot this!)" % [
-		Fmt.duration(GameState.play_time), Fmt.num(float(GameState.blocks_melted)), Fmt.num(GameState.lifetime_water),
+	var body := "The last chunk dripped away and the village is free.\nSummer is back!\n\n⏱ %s played\n🧊 %s m³ of ice melted\n💧 %s meltwater earned\n🏺 %d/%d finds\n\n(Screenshot this!)" % [
+		Fmt.duration(GameState.play_time), Fmt.num(GameState.melted_cubic_metres()), Fmt.num(GameState.lifetime_water),
 		found, Balance.DISCOVERIES.size()]
 	var p := _popup("☀️ THE END ☀️", body)
 	_popup_button(p, "Walk around the village", Color(0.25, 0.5, 0.85), func(): _close_popup(p))

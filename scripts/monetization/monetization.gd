@@ -81,7 +81,7 @@ func _on_rewarded_failed(placement: String, reason: String) -> void:
 func maybe_show_interstitial(placement: String) -> void:
 	if GameState.owns_remove_ads_2x:
 		return
-	var grid: IceGrid = GameState.grid
+	var grid: IceField = GameState.grid
 	if grid == null or 1.0 - grid.fraction_left() < Balance.INTERSTITIAL_MIN_PROGRESS:
 		return
 	var t := Time.get_unix_time_from_system()

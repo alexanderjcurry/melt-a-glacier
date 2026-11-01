@@ -14,14 +14,14 @@ const WORLD_SEED := 20261101
 # Ice layers by depth below the glacier's original surface (0 = surface).
 # Deeper ice is older, harder (hp) and worth more meltwater (hp x sell bonus).
 const LAYERS = [
-	{"name": "Fresh Snow", "hp": 1.0, "color": Color(0.96, 0.98, 1.0)},
-	{"name": "Crunchy Firn", "hp": 2.0, "color": Color(0.86, 0.93, 1.0)},
-	{"name": "Slushy Ice", "hp": 4.0, "color": Color(0.74, 0.88, 0.99)},
-	{"name": "Blue Ice", "hp": 8.0, "color": Color(0.6, 0.81, 0.97)},
-	{"name": "Old Blue Ice", "hp": 16.0, "color": Color(0.48, 0.72, 0.94)},
-	{"name": "Glacial Ice", "hp": 32.0, "color": Color(0.38, 0.62, 0.9)},
-	{"name": "Ancient Ice", "hp": 64.0, "color": Color(0.3, 0.52, 0.84)},
-	{"name": "The Last Chunk", "hp": 128.0, "color": Color(0.22, 0.4, 0.74)},
+	{"name": "Fresh Snow", "hp": 1.0, "color": Color(0.88, 0.94, 1.0)},
+	{"name": "Crunchy Firn", "hp": 2.0, "color": Color(0.78, 0.89, 0.99)},
+	{"name": "Slushy Ice", "hp": 4.0, "color": Color(0.66, 0.84, 0.98)},
+	{"name": "Blue Ice", "hp": 8.0, "color": Color(0.5, 0.76, 0.96)},
+	{"name": "Old Blue Ice", "hp": 16.0, "color": Color(0.38, 0.67, 0.93)},
+	{"name": "Glacial Ice", "hp": 32.0, "color": Color(0.28, 0.57, 0.88)},
+	{"name": "Ancient Ice", "hp": 64.0, "color": Color(0.2, 0.46, 0.8)},
+	{"name": "The Last Chunk", "hp": 128.0, "color": Color(0.14, 0.34, 0.68)},
 ]
 
 # --- Player -------------------------------------------------------------------------
