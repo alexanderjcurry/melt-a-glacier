@@ -51,6 +51,7 @@ func _run() -> void:
 		l.text = names[i]
 		l.pixel_size = 0.002
 		l.position = cell + Vector3(0, -0.6, 0)
+		l.rotation.y = PI   # the camera looks from -Z
 		world.add_child(l)
 	var rows := ceili(float(names.size()) / cols)
 	var cam := Camera3D.new()
