@@ -85,5 +85,15 @@ func _run() -> void:
 	await _frames(10)
 	await _shot("fleet_afloat")
 	print("freed: ", world.fleet.ships.map(func(s): return s.freed), " won: ", gs.has_won)
+	# Thawed crews must be back in colour (the vertex-colour material, not none).
+	for s in world.fleet.ships:
+		for holder in s.crew:
+			var mi = holder.get_child(0)
+			if mi.material_override != MeshKit.material():
+				push_error("a thawed goblin has lost its colours")
+	# Close up on the galleon's crew.
+	_place(player, Vector3(6.5, 3.0, 59.5), Vector3(4.0, 3.2, 54.0))
+	await _frames(10)
+	await _shot("fleet_crew")
 	gs.wipe_save()
 	quit(0)

@@ -7,6 +7,9 @@ var icon_label: Label
 var title_label: Label
 var desc_label: Label
 var button: Button
+var _normal: StyleBox
+var _special: StyleBoxFlat
+var _lit := false
 
 
 func setup(icon: String, title: String, desc: String, paper: bool = false) -> void:
@@ -23,6 +26,11 @@ func setup(icon: String, title: String, desc: String, paper: bool = false) -> vo
 	sb.content_margin_top = 10
 	sb.content_margin_bottom = 10
 	add_theme_stylebox_override("panel", sb)
+	_normal = sb
+	_special = sb.duplicate()
+	_special.bg_color = Color(1.0, 0.9, 0.6)
+	_special.border_color = Color(0.75, 0.24, 0.16)
+	_special.set_border_width_all(3)
 	size_flags_horizontal = Control.SIZE_EXPAND_FILL
 
 	var h := HBoxContainer.new()
@@ -81,3 +89,13 @@ func set_button(text: String, enabled: bool) -> void:
 	if button.text != text:
 		button.text = text
 	button.disabled = not enabled
+
+
+func set_highlight(on: bool) -> void:
+	## Marks the row as today's special offer (a warm, gently pulsing card).
+	if on != _lit:
+		_lit = on
+		add_theme_stylebox_override("panel", _special if on else _normal)
+	if on:
+		var t := Time.get_ticks_msec() / 1000.0
+		_special.bg_color = Color(1.0, 0.9, 0.6).lerp(Color(1.0, 0.82, 0.5), 0.5 + 0.5 * sin(t * 3.4))

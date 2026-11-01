@@ -43,7 +43,6 @@ var _tool_model: Node3D
 var _shown_tool := -1
 var _shown_gold := false
 var _fx: ToolFx                     # what comes out of the tool (each tool has its own look)
-var _steam: CPUParticles3D
 var _drips: CPUParticles3D
 var _jet: CPUParticles3D
 var _kick := 0.0
@@ -83,19 +82,6 @@ func _ready() -> void:
 
 	_fx = ToolFx.new()
 	add_child(_fx)
-
-	_steam = _make_particles(Color(1, 1, 1, 0.75), Color(1, 1, 1, 0.0), 0.35, 40)
-	_steam.direction = Vector3(0, 1, 0)
-	_steam.spread = 35.0
-	_steam.gravity = Vector3(0, 2.5, 0)
-	_steam.initial_velocity_min = 0.8
-	_steam.initial_velocity_max = 2.0
-	_steam.lifetime = 1.1
-	_steam.emission_shape = CPUParticles3D.EMISSION_SHAPE_SPHERE
-	_steam.emission_sphere_radius = 0.35
-	_steam.local_coords = false
-	add_child(_steam)
-	_steam.top_level = true
 
 	# Meltwater dripping off where the heat lands.
 	_drips = _make_particles(Color(0.75, 0.9, 1.0, 0.9), Color(0.6, 0.85, 1.0, 0.0), 0.07, 24)
@@ -370,12 +356,9 @@ func _update_tool(delta: float) -> void:
 			_heat_grid.set_heat(_heat_pos, 0.0)
 		_heat_grid = g
 		g.damage_sphere(target.pos - normal * 0.2, GameState.tool_radius(), GameState.tool_power() * delta)
-		_steam.global_position = target.pos + normal * 0.2
 		_drips.global_position = target.pos + normal * 0.1
-		_steam.emission_sphere_radius = 0.15 + radius * 0.25   # a wider nozzle steams a wider patch
-		_drips.emission_sphere_radius = 0.15 + radius * 0.25
+		_drips.emission_sphere_radius = 0.15 + radius * 0.25   # a wider nozzle drips over a wider patch
 		_heat_pos = target.pos
-	_steam.emitting = working
 	_drips.emitting = working
 	heat = move_toward(heat, 1.0 if working else 0.0, delta * (5.0 if working else 2.0))
 	if _heat_grid != null:

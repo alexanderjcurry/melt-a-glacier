@@ -1,0 +1,17 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#ffb347"/><stop offset="1" stop-color="#ff7a59"/></linearGradient>
+    <linearGradient id="gl" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#ffffff"/><stop offset="0.45" stop-color="#c9ecfc"/><stop offset="1" stop-color="#6fc0ec"/></linearGradient>
+  </defs>
+  <rect width="1024" height="1024" fill="url(#bg)"/>
+  <circle cx="770" cy="250" r="120" fill="#fff2b0"/>
+  <!-- glacier with drips running off the bottom -->
+  <path d="M110 640 L300 300 L420 420 L560 220 L760 520 L914 640
+           L914 700 Q880 700 880 740 L880 800 Q880 840 850 840 Q820 840 820 800 L820 730
+           Q800 700 760 710 L740 860 Q735 905 700 905 Q665 905 662 860 L650 730
+           Q620 700 580 712 L560 780 Q552 815 525 815 Q498 815 494 780 L480 715
+           Q440 700 400 720 L380 900 Q376 950 340 950 Q304 950 300 900 L290 730
+           Q250 700 210 720 L200 780 Q196 815 168 815 Q140 815 138 780 L130 700 Q110 690 110 670 Z" fill="url(#gl)"/>
+  <path d="M300 300 L420 420 L380 450 L330 380 L270 470 L250 400 Z M560 220 L640 340 L600 360 L560 310 L520 370 L500 320 Z" fill="#ffffff"/>
+  <path d="M110 640 L914 640" stroke="#8fd0f0" stroke-width="10" opacity="0.6"/>
+</svg>

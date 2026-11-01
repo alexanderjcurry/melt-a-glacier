@@ -72,7 +72,7 @@ Store builds (Android App Bundle, and the iPhone build on Codemagic) are made by
 | A fence across the valley keeps you off the lake. Its gate is locked until the village is free, then swings open. Your helpers retire and party in the village, and you hire a new crew for the lake at the same prices. Tools and upgrades carry over | `World._build_fence()`, `GameState.check_win()` |
 | First-person walking (CharacterBody3D on the ice's collision mesh), step-up, a jetpack (hold JUMP, fuel refills on landing) and a respawn button | `scripts/player.gd` |
 | The valley: generated mountains with rock and snow, a cloudy sky, the lake and a meltwater stream, pine forest, boulders | `scripts/scenery.gd`, `shaders/` |
-| The heat tool: aim with the crosshair, hold to melt a ball of ice. Each tool has its own spray (wavy hot air, a warm lamp glow, a blue torch flame, rolling fire, an arc of lava, a sunbeam from space), and upgrades show in it: Wider Nozzle makes it wider where it lands, Longer Reach makes it go further, Heat Output makes it brighter | `Player._update_tool()`, `scripts/tool_fx.gd`, `shaders/heat_beam.gdshader` |
+| The heat tool: aim with the crosshair, hold to melt a ball of ice. Each tool has its own 3D effect: rings of hot air in a warm haze, a cone of lamp light with dust glinting in it, a blue torch flame and jet, billowing fire with embers, a molten lava stream that drips and splashes, and a column of sunlight from space with shockwaves. Where it lands the ice steams, sparks or flurries. Upgrades show in it: Wider Nozzle makes it wider where it lands, Longer Reach makes it go further, Heat Output makes it brighter and denser | `Player._update_tool()`, `scripts/tool_fx.gd`, `shaders/tool_cone.gdshader`, `shaders/spark.gdshader` |
 | The shed is a walk-in store: tools hang on the pegboard, upgrades sit on the workbench, helpers wait in the hiring corner, finds go on the shelf by the door, and the catalogue on the table has the boost and purchases. Look at anything for a paper price card, then buy it where it stands | `scripts/shed.gd`, `Hud.set_shop_info()` |
 | 6 tools bought in order at the shed: Hair Dryer, Heat Lamp, Blowtorch, Flamethrower, Lava Hose, Orbital Mirror (the same models you hold) | `Balance.TOOLS`, `scripts/props.gd` |
 | 5 upgrades: Heat Output, Wider Nozzle, Longer Reach, Steam Sell, Crampon Boots | `Balance.UPGRADES` |
@@ -82,7 +82,8 @@ Store builds (Android App Bundle, and the iPhone build on Codemagic) are made by
 | The valley greens up and flowers bloom where the ice is gone; villagers come out at the end | `World._update_slow()` |
 | Loose ice melts by itself: bits left floating, and small chunks on the ground (under about 4 m³), shrink away over a few seconds, corners first, and still pay out | `IceField._melt_floating()` |
 | No "while you were away" earnings: it's a game you play in a sitting, so nothing melts while it's closed | |
-| Rewarded ad: 2x heat for 5 min (stacks to 15). IAP: Remove Ads + permanent 2x, Golden Hair Dryer, Restore | HUD button, the catalogue in the shed |
+| The catalogue: a button at the top right of the HUD (C or Tab on a computer), or the book in the shed. Free bonuses for a rewarded ad: 2x heat for 5 min (stacks to 15), helpers work 3x for 3 min, and double your water (capped at about 4 minutes of your recent income). IAP: Remove Ads + permanent 2x, Golden Hair Dryer, Restore | `Hud.open_catalogue()`, `Balance.AD_REWARDS`, `GameState.grant_ad_reward()` |
+| Timed ad offers: now and then a paper tag swings down under the catalogue button ("FREE BONUS: Double your water, +💧 70K, enough for the Flamethrower!"). Tap it (or press B) to watch. Kept gentle on purpose: none in the first 2.5 minutes, one at a time, gone after 40 s, the next one waits longer each time you let one pass (200 s up to 8 min), only offers that are worth having right now, and never one whose ad hasn't loaded. After you choose a rewarded ad, no interstitial for a while | `scripts/ad_offers.gd`, `Balance.OFFER_*`, `Hud._update_offer()` |
 | Light interstitials: only when leaving the shed, after 15% of the ice is gone, at most every 4 min, never with Remove Ads | `Monetization.maybe_show_interstitial()` |
 | A popup when the village is free, an ending with a stats screen when the lake is, then walk around or melt a new valley | `Hud.show_stage_done()`, `Hud.show_ending()` |
 | Short onboarding hints the first time | `World._update_coach()` |
@@ -106,7 +107,7 @@ scripts/props.gd         models of the six tools and the upgrade items
 scripts/scenery.gd       mountains, sky, lake, stream, forest, boulders
 scripts/ice_field.gd     the glacier: density field, meshing, melting, collision, save string
 scripts/player.gd        first-person movement, jetpack, respawn, the heat tool
-scripts/tool_fx.gd       what comes out of each tool (spray, glow, splash), sized by your upgrades
+scripts/tool_fx.gd       what comes out of each tool (flames, beams, sparks, steam), sized by your upgrades
 scripts/creatures.gd     3D models of the helpers (penguin, sauna crew, Kevin)
 scripts/mesh_kit.gd      tiny modelling kit (ellipsoids, cylinders, boxes) for the models
 scripts/touch_controls.gd  phone controls (multi-touch stick, look, melt, jump)
@@ -114,9 +115,10 @@ scripts/helpers.gd       penguins, sauna crew, Kevin the volcano
 scripts/hud.gd           HUD, shed price card, catalogue, toasts, popups, ending
 scripts/ui_theme.gd      shared UI look, emoji font, particle texture
 scripts/shop_row.gd      one catalogue row
+scripts/ad_offers.gd     when the HUD's timed ad-offer tag shows up, and which reward it offers
 scripts/fmt.gd           1.23K / 4.5M number formatting
 scripts/monetization/    ad + IAP interface, stub provider, autoload facade
-shaders/                 ice, mountain rock and snow, sky, water, shed wood, the tools' heat beam
+shaders/                 ice, mountain rock and snow, sky, water, shed wood, the tools' flames and sparks
 fonts/                   subset Noto Color Emoji (the placeholder art) + license
 tests/smoke_test.gd      headless test: godot --headless -s res://tests/smoke_test.gd
 tests/screenshots.gd     renders screenshots of key moments (see the top of the file)

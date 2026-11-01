@@ -156,7 +156,7 @@ func describe(it: Dictionary) -> Dictionary:
 		"find":
 			return _describe_find(int(it.id))
 		"catalogue":
-			return {"title": "📖 The Catalogue", "body": "Mail-order extras: the 2x heat boost, no ads, the golden hair dryer.",
+			return {"title": "📖 The Catalogue", "body": "Mail-order extras: free bonuses for a short ad, no ads, the golden hair dryer. (It is also behind the button at the top right.)",
 				"price": "", "can": true, "action": "OPEN"}
 	return {}
 

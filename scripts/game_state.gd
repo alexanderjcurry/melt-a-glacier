@@ -23,6 +23,7 @@ var discovered: Array = []             # index -> bool
 var melted_volume: float = 0.0         # m³ of ice melted, all glaciers
 var stage: int = 0                     # which glacier you're melting (index into the level's glaciers)
 var boost_until: float = 0.0
+var helper_rush_until: float = 0.0     # rewarded ad: helpers work 3x until then
 var owns_remove_ads_2x: bool = false   # IAP
 var owns_golden_dryer: bool = false    # IAP (cosmetic)
 var golden_equipped: bool = false
@@ -40,6 +41,10 @@ var grids: Array = []                  # every glacier in the level, in order
 var player: Node3D
 var debug_speed: float = 1.0           # dev menu multiplier
 var _autosave_timer: float = 0.0
+var _income: Array = []                # meltwater earned per INCOME_BUCKET seconds, newest last
+var _income_t: float = 0.0
+const INCOME_BUCKET := 15.0
+const INCOME_BUCKETS := 16             # 4 minutes
 
 
 func _ready() -> void:
@@ -65,6 +70,8 @@ func reset_state(keep_purchases: bool = false) -> void:
 	melted_volume = 0.0
 	stage = 0
 	boost_until = 0.0
+	helper_rush_until = 0.0
+	_income = []
 	play_time = 0.0
 	has_won = false
 	owns_remove_ads_2x = keep_ads if keep_purchases else false
@@ -84,6 +91,12 @@ func now() -> float:
 func _process(delta: float) -> void:
 	if not has_won:
 		play_time += minf(delta, 1.0)
+	_income_t += minf(delta, 1.0)
+	if _income.is_empty() or _income_t >= INCOME_BUCKET:
+		_income_t = 0.0
+		_income.append(0.0)
+		if _income.size() > INCOME_BUCKETS:
+			_income.pop_front()
 	_autosave_timer += delta
 	if _autosave_timer >= AUTOSAVE_INTERVAL:
 		_autosave_timer = 0.0
@@ -137,7 +150,8 @@ func sell_mult() -> float:
 
 func helper_each(i: int) -> float:
 	## hp per second from one helper of type i (or one of Kevin's levels).
-	return float(Balance.HELPERS[i].power) * global_mult() * debug_speed
+	var m := Balance.HELPER_RUSH_MULT if is_helper_rush_active() else 1.0
+	return float(Balance.HELPERS[i].power) * global_mult() * m * debug_speed
 
 
 func helper_power(i: int) -> float:
@@ -169,6 +183,37 @@ func boost_seconds_left() -> float:
 	return maxf(0.0, boost_until - now())
 
 
+func is_helper_rush_active() -> bool:
+	return now() < helper_rush_until
+
+
+func helper_rush_seconds_left() -> float:
+	return maxf(0.0, helper_rush_until - now())
+
+
+func has_helpers() -> bool:
+	for c in helper_counts:
+		if int(c) > 0:
+			return true
+	return false
+
+
+func income_per_minute() -> float:
+	## Meltwater per minute over the last few minutes (melting, helpers, finds).
+	if _income.is_empty():
+		return 0.0
+	var total := 0.0
+	for v in _income:
+		total += float(v)
+	var span := INCOME_BUCKET * float(_income.size() - 1) + maxf(_income_t, 1.0)
+	return total / span * 60.0
+
+
+func double_water_amount() -> float:
+	## What "double your water" pays: your water again, capped at a few minutes of income.
+	return minf(water, maxf(Balance.DOUBLE_WATER_MIN * 3.0, income_per_minute() * Balance.DOUBLE_WATER_MINUTES))
+
+
 # --- Earning ------------------------------------------------------------------------------
 func on_ice_melted(volume: float, value: float) -> float:
 	## `volume` m³ of ice just melted; `value` is their layers' hp x m³.
@@ -176,14 +221,23 @@ func on_ice_melted(volume: float, value: float) -> float:
 	melted_volume += volume
 	water += v
 	lifetime_water += v
+	_note_income(v)
 	changed.emit()
 	return v
 
 
-func grant_water(amount: float) -> void:
+func grant_water(amount: float, counts_as_income: bool = true) -> void:
 	water += amount
 	lifetime_water += amount
+	if counts_as_income:
+		_note_income(amount)
 	changed.emit()
+
+
+func _note_income(v: float) -> void:
+	if _income.is_empty():
+		_income.append(0.0)
+	_income[_income.size() - 1] = float(_income[_income.size() - 1]) + v
 
 
 func discover(i: int) -> void:
@@ -291,6 +345,25 @@ func start_boost() -> void:
 	changed.emit()
 
 
+func grant_ad_reward(kind: String) -> String:
+	## A rewarded ad finished: hand out `kind` (see Balance.AD_REWARDS) and
+	## return the toast that says what you got.
+	match kind:
+		"double_water":
+			var amount := double_water_amount()
+			grant_water(amount, false)   # not income, or the next offer would grow
+			save_game()
+			return "💧 +%s meltwater!" % Fmt.num(amount)
+		"heat_rush":
+			start_boost()
+			return "🔥 2x heat for 5 minutes!"
+		"helper_rush":
+			helper_rush_until = maxf(now(), helper_rush_until) + Balance.HELPER_RUSH_DURATION
+			changed.emit()
+			return "🐧 Your helpers are working 3x as hard!"
+	return ""
+
+
 func _notification(what: int) -> void:
 	match what:
 		NOTIFICATION_APPLICATION_PAUSED, NOTIFICATION_APPLICATION_FOCUS_OUT, NOTIFICATION_WM_CLOSE_REQUEST:
@@ -324,6 +397,7 @@ func to_dict() -> Dictionary:
 		"melted_volume": melted_volume,
 		"stage": stage,
 		"boost_until": boost_until,
+		"helper_rush_until": helper_rush_until,
 		"owns_remove_ads_2x": owns_remove_ads_2x,
 		"owns_golden_dryer": owns_golden_dryer,
 		"golden_equipped": golden_equipped,
@@ -372,6 +446,7 @@ func load_game() -> void:
 	melted_volume = float(data.get("melted_volume", 0.0))
 	stage = maxi(0, int(data.get("stage", 0)))
 	boost_until = float(data.get("boost_until", 0.0))
+	helper_rush_until = float(data.get("helper_rush_until", 0.0))
 	play_time = float(data.get("play_time", 0.0))
 	has_won = bool(data.get("has_won", false))
 	var pp: Array = data.get("player_pos", [])

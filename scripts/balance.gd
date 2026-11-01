@@ -145,6 +145,27 @@ const BOOST_MULT := 2.0
 const PERMANENT_MULT := 2.0            # from the "Remove ads + permanent 2x" IAP
 const INTERSTITIAL_COOLDOWN := 240.0
 const INTERSTITIAL_MIN_PROGRESS := 0.15  # no interstitials before 15% of the ice is gone
+const HELPER_RUSH_DURATION := 180.0    # "watch an ad: helpers work 3x for 3 min"
+const HELPER_RUSH_MULT := 3.0
+# "Double your water" pays your water again, up to this many minutes of your
+# recent income (so saving up for ages doesn't turn one ad into a whole tool).
+const DOUBLE_WATER_MINUTES := 4.0
+const DOUBLE_WATER_MIN := 100.0        # not worth an ad below this
+
+# Ad offers: now and then a paper tag swings down under the catalogue button
+# offering one of the rewards above for a short ad. Players of idle games hate
+# being nagged, so offers are rare, never block play, go away on their own,
+# and come round less often the more of them you let pass.
+const OFFER_FIRST_AFTER := 150.0       # seconds of play before the first one
+const OFFER_GAP := 200.0               # seconds between one offer going and the next
+const OFFER_GAP_MAX := 480.0           # ...growing up to this as offers are ignored
+const OFFER_GAP_GROWTH := 1.5
+const OFFER_LIFETIME := 40.0           # how long a tag stays up
+const AD_REWARDS = {
+	"double_water": {"icon": "💧", "title": "Double your water", "placement": "double_water"},
+	"heat_rush": {"icon": "🔥", "title": "2x heat for 5 min", "placement": "boost_2x_heat"},
+	"helper_rush": {"icon": "🐧", "title": "Helpers work 3x for 3 min", "placement": "helper_rush"},
+}
 
 
 static func rarity(d: int) -> Dictionary:
