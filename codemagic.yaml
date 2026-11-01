@@ -19,7 +19,7 @@ workflows:
         - apple   # APPLE_TEAM_ID (10 characters), APP_STORE_APPLE_ID (the app's numeric Apple ID)
       ios_signing:
         distribution_type: app_store
-        bundle_identifier: com.alexcurry.meltaglacier
+        bundle_identifier: com.gamequarry.meltaglacier
       xcode: latest
       vars:
         PROJECT: build/ios/MeltAGlacier.xcodeproj

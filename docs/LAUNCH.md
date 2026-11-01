@@ -17,7 +17,7 @@ privacy policy, needs a paid GitHub plan for private repos).
 
 | What | Proposed | Where it's used |
 |---|---|---|
-| Bundle id / package name | `com.alexcurry.meltaglacier` | `export_presets.cfg` (Android + iOS), `codemagic.yaml`, `.github/workflows/mobile.yml` |
+| Bundle id / package name | `com.gamequarry.meltaglacier` | `export_presets.cfg` (Android + iOS), `codemagic.yaml`, `.github/workflows/mobile.yml` |
 | Contact email for players | (yours) | replace `CONTACT_EMAIL` in `docs/privacy.html` |
 
 The bundle id can never change once the app is in either store.
