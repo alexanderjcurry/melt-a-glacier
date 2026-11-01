@@ -39,7 +39,7 @@ func _run() -> void:
 	root.add_child(world)
 	var hud = world.hud
 	var player = world.player
-	var grid = world.grid
+	var grid = world.grid   # the village glacier
 	if OS.get_cmdline_user_args().has("touch"):
 		hud.set_touch_mode(true)
 	await _frames(10)
@@ -173,18 +173,68 @@ func _run() -> void:
 	await _frames(30)
 	await _shot("08_half_melted")
 
-	# The ending.
+	# The fence across the valley with the frozen lake behind it. Locked for now.
+	player.position = Vector3(4.0, 0.0, 14.5)
+	player.unstick()
+	_aim_at(player, Vector3(0.0, 3.0, 40.0))
+	await _frames(20)
+	await _shot("08b_gate_locked")
+
+	# The village is free: on to the lake.
 	grid.melt_everything()
 	await _frames(30)
-	await _shot("09_ending_popup")
-	for c in hud.popups.get_children():
-		hud.popups.remove_child(c)
-		c.queue_free()
+	await _shot("09_village_free_popup")
+	_close_popups(hud)
 	player.input_enabled = true
 	player.position = Vector3(2.0, 0.0, -4.0)
 	player.unstick()
 	_aim_at(player, Vector3(0.0, 2.0, -16.0))
 	await _frames(60)
 	await _shot("10_village")
+	player.position = Vector3(3.0, 0.0, 15.0)
+	player.unstick()
+	_aim_at(player, Vector3(0.0, 1.5, 30.0))
+	await _frames(30)
+	await _shot("11_gate_open")
+
+	# Up close to the lake ice.
+	var lake = gs.grid
+	player.position = Vector3(-8.0, 0.0, 27.5)
+	player.unstick()
+	_aim_at(player, Vector3(0.0, 5.0, 45.0))
+	await _frames(30)
+	await _shot("12_lake_close")
+	# Slice the top off: the coloured layers show as rings.
+	for i in lake.f.size():
+		if lake.f[i] > 0.0 and lake.point_pos(i).y > 6.5:
+			lake.f[i] = 0.0
+	lake._count()
+	lake._update_col_top(0, lake.nx - 1, 0, lake.nz - 1)
+	for ci in lake._chunks.size():
+		lake._dirty[ci] = true
+	lake.flush()
+	player.position = Vector3(-4.0, 7.0, 44.0)
+	player.unstick()
+	_aim_at(player, Vector3(2.0, 3.0, 66.0))
+	await _frames(30)
+	await _shot("13_lake_layers")
+
+	# The ending.
+	lake.melt_everything()
+	await _frames(30)
+	await _shot("14_ending_popup")
+	_close_popups(hud)
+	player.input_enabled = true
+	player.position = Vector3(0.0, 0.0, 26.0)
+	player.unstick()
+	_aim_at(player, Vector3(0.0, 0.0, 66.0))
+	await _frames(60)
+	await _shot("15_lake_free")
 	gs.wipe_save()
 	quit(0)
+
+
+func _close_popups(hud) -> void:
+	for c in hud.popups.get_children():
+		hud.popups.remove_child(c)
+		c.queue_free()

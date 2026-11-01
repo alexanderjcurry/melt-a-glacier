@@ -29,8 +29,15 @@ const WIN_Y1 := 2.85
 const LOOK_RANGE := 4.0
 const SLOTS := [10.45, 11.58, 12.71, 13.84, 14.97, 16.1]   # columns on the tool wall and the bench
 const HELPER_Z := [9.6, 11.5, 13.4]
-const FIND_ROWS := [0.55, 1.05, 1.55, 2.05]
-const FIND_Z := [8.67, 9.4, 10.13]
+# The last slots on the finds shelf are the glaciers themselves.
+const GLACIER_SLOTS := [
+	{"glacier": 0, "icon": "🏘️", "title": "The Village", "body": "Free at last! Everyone's home.",
+		"hint": "Something big is under all that ice."},
+	{"glacier": 1, "icon": "🏞️", "title": "The Lake", "body": "Thawed out. Summer is back!",
+		"hint": "What's under the frozen lake?"},
+]
+const FIND_ROWS := [0.08, 0.5, 0.92, 1.34, 1.76]   # shelf heights, bottom up
+const FIND_Z := [8.56, 9.12, 9.68, 10.24]
 const LAMPS := [Vector3(11.5, 2.66, 11.5), Vector3(14.5, 2.66, 11.5)]
 
 const RED_PAINT := Color(0.62, 0.17, 0.13)
@@ -197,24 +204,33 @@ func _describe_helper(i: int) -> Dictionary:
 	var h: Dictionary = Balance.HELPERS[i]
 	var n := int(GameState.helper_counts[i])
 	var cost := GameState.helper_cost(i)
-	var each := float(h.power) * GameState.global_mult()
+	var each := GameState.helper_each(i) / maxf(GameState.debug_speed, 0.001)
 	return {"title": "%s %s" % [h.icon, h.name],
 		"body": "%s\nMelts %s hp/s. You have %d." % [h.desc, Fmt.num(each), n],
 		"price": "💧 " + Fmt.num(cost), "can": GameState.water >= cost, "action": "HIRE"}
 
 
+func _glacier_slot_found(slot: int) -> bool:
+	var g := int(GLACIER_SLOTS[slot].glacier)
+	return GameState.has_won or GameState.stage > g
+
+
 func _describe_find(d: int) -> Dictionary:
 	if d >= Balance.DISCOVERIES.size():
-		if GameState.has_won:
-			return {"title": "🏘️ The Village", "body": "Free at last! Summer is back.", "price": "", "can": false, "action": ""}
-		return {"title": "🧊 ???", "body": "Something big is under all that ice.", "price": "", "can": false, "action": ""}
+		var gs: Dictionary = GLACIER_SLOTS[d - Balance.DISCOVERIES.size()]
+		if _glacier_slot_found(d - Balance.DISCOVERIES.size()):
+			return {"title": "%s %s" % [gs.icon, gs.title], "body": gs.body, "price": "", "can": false, "action": ""}
+		return {"title": "🧊 ???", "body": gs.hint, "price": "", "can": false, "action": ""}
 	var info: Dictionary = Balance.DISCOVERIES[d]
 	if GameState.discovered[d]:
 		return {"title": "%s %s" % [info.icon, info.name],
 			"body": "%s\nSold for 💧 %s" % [info.flavor, Fmt.num(float(info.value) * GameState.sell_mult())],
 			"price": "", "can": false, "action": ""}
-	return {"title": "🧊 Still frozen", "body": "Somewhere in the %s." % Balance.LAYERS[int(info.layer)].name,
-		"price": "", "can": false, "action": ""}
+	var layer_set: Array = Balance.LAYER_SETS[GameState.grids[int(info.glacier)].spec.layers] if not GameState.grids.is_empty() else Balance.LAYER_SETS.valley
+	var where := "Somewhere in the %s" % layer_set[int(info.layer)].name
+	if int(info.glacier) > GameState.stage:
+		where += " of the frozen lake"
+	return {"title": "🧊 Still frozen", "body": where + ".", "price": "", "can": false, "action": ""}
 
 
 func use(it: Dictionary) -> Dictionary:
@@ -378,7 +394,8 @@ func refresh() -> void:
 				_set_text(price, cost if n == 0 else "%d hired · %s" % [n, cost], INK)
 			"find":
 				var d := int(it.id)
-				var found: bool = GameState.has_won if d >= Balance.DISCOVERIES.size() else GameState.discovered[d]
+				var nd := Balance.DISCOVERIES.size()
+				var found: bool = _glacier_slot_found(d - nd) if d >= nd else GameState.discovered[d]
 				(it.node as Node3D).visible = found
 				(_ice_cubes[d] as Node3D).visible = not found
 
@@ -845,19 +862,22 @@ func _build_finds() -> void:
 	_box(Vector3(x, 2.21, za), Vector3(x + d, 2.25, zb), TEAL, PAINT)
 	_box(Vector3(x, 0.0, za), Vector3(x + d, 0.08, zb), TEAL.darkened(0.2), PAINT)
 	for y in FIND_ROWS:
-		_box(Vector3(x, y - 0.03, za + 0.04), Vector3(x + d, y, zb - 0.04), TEAL.lightened(0.1), PAINT)
+		if y > 0.1:
+			_box(Vector3(x, y - 0.03, za + 0.04), Vector3(x + d, y, zb - 0.04), TEAL.lightened(0.1), PAINT)
 	_board(Vector3(x + 0.045, 2.52, (za + zb) * 0.5), 2.1, 0.3, PI / 2.0, RED_PAINT)
 	_solid(Vector3(x, 0.0, za), Vector3(x + d, 2.25, zb))
 	_text("FOUND IN THE ICE", Vector3(x + 0.068, 2.52, (za + zb) * 0.5), PI / 2.0, 56, 0.0031, PAPER)
-	var n := Balance.DISCOVERIES.size() + 1
-	for slot in n:
+	# One slot per find, then one for each glacier itself (the village, the lake).
+	var n := Balance.DISCOVERIES.size() + GLACIER_SLOTS.size()
+	for slot in mini(n, FIND_ROWS.size() * FIND_Z.size()):
 		var y: float = FIND_ROWS[FIND_ROWS.size() - 1 - slot / FIND_Z.size()]
 		var z: float = FIND_Z[slot % FIND_Z.size()]
-		var icon: String = Balance.DISCOVERIES[slot].icon if slot < Balance.DISCOVERIES.size() else "🏘️"
+		var nd := Balance.DISCOVERIES.size()
+		var icon: String = Balance.DISCOVERIES[slot].icon if slot < nd else str(GLACIER_SLOTS[slot - nd].icon)
 		var l := Label3D.new()
 		l.text = icon
 		l.font_size = 128
-		l.pixel_size = 0.0021
+		l.pixel_size = 0.0019
 		l.alpha_cut = Label3D.ALPHA_CUT_DISCARD
 		l.position = Vector3(x + 0.22, y + 0.17, z)
 		l.rotation.y = PI / 2.0
@@ -865,11 +885,11 @@ func _build_finds() -> void:
 		# Still frozen: a see-through block of ice with a question mark inside.
 		var cmi := MeshInstance3D.new()
 		var bm := BoxMesh.new()
-		bm.size = Vector3(0.3, 0.3, 0.3)
+		bm.size = Vector3(0.28, 0.28, 0.28)
 		cmi.mesh = bm
 		cmi.material_override = _ice_material()
 		cmi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
-		cmi.position = Vector3(x + 0.22, y + 0.15, z)
+		cmi.position = Vector3(x + 0.22, y + 0.16, z)
 		cmi.rotation.y = 0.15 * float((slot * 7) % 5 - 2)
 		cmi.layers = 3
 		add_child(cmi)
@@ -883,7 +903,7 @@ func _build_finds() -> void:
 		q.rotation.y = PI / 2.0 - cmi.rotation.y
 		cmi.add_child(q)
 		_ice_cubes[slot] = cmi
-		_add_item("find", slot, l, Vector3(x, y, z - 0.36), Vector3(x + d + 0.05, y + 0.46, z + 0.36), null, null)
+		_add_item("find", slot, l, Vector3(x, y, z - 0.27), Vector3(x + d + 0.05, y + 0.4, z + 0.27), null, null)
 
 
 var _ice_mat: StandardMaterial3D

@@ -2,7 +2,8 @@ extends SceneTree
 ## Headless smoke test: godot --headless -s res://tests/smoke_test.gd
 ## Builds the valley, walks up onto the glacier, melts with the tool, checks
 ## the phone controls, jetpack and respawn, buys things, digs up a find, checks
-## that loose ice melts by itself, saves, and melts everything to the ending.
+## that loose ice melts by itself, saves, melts the village glacier (the gate
+## to the frozen lake opens, the helpers retire), then the lake: the ending.
 ## Exits with code 1 if anything fails.
 ## Variables stay untyped: this script compiles before the GameState autoload
 ## exists, so it can't name classes that use it (World, Player, Hud...).
@@ -78,12 +79,12 @@ func _run() -> void:
 	check(player.position.z < world.SPAWN.z - 12.0 and player.position.y > 1.0, "walked up onto the ice (at %s)" % player.position)
 
 	# --- Aim at the front of the glacier and melt it with the hair dryer.
-	# Find where the snout is about chest high, stand 2.5 m in front of it and
-	# aim a little way into the ice.
+	# Find where the snout is head high, stand 2.5 m in front of it and aim a
+	# little way into the ice.
 	var front_z := 4.0
-	while front_z > -10.0 and grid.surface_y(1.0, front_z) < 1.3:
+	while front_z > -10.0 and grid.surface_y(1.0, front_z) < 2.2:
 		front_z -= 0.1
-	var target := Vector3(1.0, 0.9, front_z - 0.6)
+	var target := Vector3(1.0, 1.1, front_z - 0.6)
 	player.respawn(Vector3(1.0, 0.0, front_z + 2.5), 0.0)
 	player._move(1.0 / 60.0)
 	_aim_at(player, target)
@@ -97,8 +98,11 @@ func _run() -> void:
 		player._update_tool(1.0 / 30.0)
 		grid.flush()
 	player.melting = false
+	# New collision shapes only reach physics queries after a physics step.
+	await physics_frame
+	await physics_frame
 	player._update_tool(0.0)
-	check(grid.remaining < left0, "the hair dryer melted %.2f m3" % ((left0 - grid.remaining) * 0.125))
+	check(grid.remaining < left0, "the hair dryer melted %.2f m3" % ((left0 - grid.remaining) * grid.point_volume))
 	check(gs.water > water0, "melting paid out (%s water)" % gs.water)
 	check(player.target.hit and player.target.pos.distance_to(first_hit) > 0.4, "it dug a hole: the ice surface moved back %.2f m" % (player.target.pos.distance_to(first_hit) if player.target.hit else 0.0))
 
@@ -217,6 +221,15 @@ func _run() -> void:
 		player._move(1.0 / 60.0)
 	player.move_input = Vector2.ZERO
 	check(player.position.x > 19.0, "walked all the way behind the glacier (to x=%.1f)" % player.position.x)
+	# --- The fence in front of the lake stops you until the village is free.
+	var gate_z: float = world.level.valley.gate_z
+	check(world.glaciers.size() == 2 and not world.glaciers[1].collide, "the frozen lake is there, out of reach")
+	player.respawn(Vector3(0.0, 0.0, gate_z - 4.0), PI)   # facing the gate (+z)
+	player.move_input = Vector2(0, 1)
+	for _i in 180:
+		player._move(1.0 / 60.0)
+	player.move_input = Vector2.ZERO
+	check(player.position.z < gate_z, "the locked gate keeps you off the lake (z=%.1f)" % player.position.z)
 
 	# --- The shed: walk in through the door, look at things and buy them.
 	gs.grant_water(1e6)
@@ -427,19 +440,69 @@ func _run() -> void:
 	var saved: String = grid.to_save_string()
 	var copy = IceField.new()
 	world.add_child(copy)
-	copy.generate(world.level, [])
+	copy.generate(world.level.glaciers[0], int(world.level.seed), [])
 	check(copy.load_save_string(saved) and copy.remaining <= grid.remaining + 5 and copy.remaining >= grid.remaining - 5,
 		"glacier save/load round trip (%d vs %d)" % [copy.remaining, grid.remaining])
 	copy.queue_free()
 
-	# --- Melt everything: all finds, the ending.
+	# --- Melt the village glacier: the village is free, the gate opens.
 	var won := [false]
 	gs.won.connect(func(): won[0] = true)
+	var helpers_before: int = world.helpers._walkers.size()
 	grid.melt_everything()
 	await _frames(2)
-	check(won[0] and gs.has_won, "melting everything wins")
-	check(not gs.discovered.has(false), "every find was discovered")
+	var lake = world.glaciers[1]
+	check(not won[0] and gs.stage == 1 and gs.grid == lake, "melting the village glacier opens the next stage, not the ending")
 	check(world._villagers[0].visible, "the villagers came out")
+	check(gs.helper_counts[0] == 0 and world.helpers._walkers.is_empty() and world.helpers._retired.size() == mini(helpers_before, 14),
+		"the helpers retired (%d partying) and you hire a new crew" % world.helpers._retired.size())
+	check(gs.helper_cost(0) > 100.0 * float(Balance.HELPERS[0].base), "the lake crew costs more (%s)" % Fmt.num(gs.helper_cost(0)))
+	check(world.hud.popups.get_child_count() > 0, "a popup says the village is free")
+	for c in world.hud.popups.get_children():
+		c.queue_free()
+	player.input_enabled = true
+	var valley_finds := true
+	for d in Balance.finds_in(0):
+		valley_finds = valley_finds and gs.discovered[d]
+	check(valley_finds and not gs.discovered[Balance.finds_in(1)[0]], "every village find was dug up, the lake's are still frozen")
+	await _frames(5)
+	lake.flush()
+	check(lake.collide and world._gate_shape.disabled, "the gate is open and the lake ice is solid")
+	player.respawn(Vector3(0.0, 0.0, gate_z - 4.0), PI)
+	player.move_input = Vector2(0, 1)
+	for _i in 300:
+		player._move(1.0 / 60.0)
+	player.move_input = Vector2.ZERO
+	check(player.position.z > gate_z + 4.0, "walked through the gate toward the lake (z=%.1f)" % player.position.z)
+	# The lake shore is much wider than the valley, but the mountains still stop you.
+	player.respawn(Vector3(0.0, 0.0, 30.0), -PI / 2.0)   # facing +x
+	player.move_input = Vector2(0, 1)
+	for _i in 900:
+		player._move(1.0 / 60.0)
+	player.move_input = Vector2.ZERO
+	var edge: float = player.position.x
+	check(edge > 30.0 and world.walkable(player.position.x, player.position.z), "walked along the lake shore past the old valley walls (x=%.1f)" % edge)
+	check(not world.walkable(edge + 6.0, player.position.z), "and stopped at the mountains")
+	# Melt the lake from the shore with the tool.
+	var lake_left: int = lake.remaining
+	var near := Vector3(0.0, 0.0, 30.0)
+	while near.z < 60.0 and lake.surface_y(near.x, near.z + 3.0) < 1.5:
+		near.z += 0.5
+	player.respawn(near, PI)
+	player._move(1.0 / 60.0)
+	_aim_at(player, Vector3(near.x, 1.0, near.z + 3.5))
+	player.melting = true
+	for _i in 30:
+		player._update_tool(1.0 / 30.0)
+	player.melting = false
+	player._update_tool(0.0)
+	check(lake.remaining < lake_left, "the tool melts the lake ice (%.1f m3)" % ((lake_left - lake.remaining) * lake.point_volume))
+
+	# --- Melt the lake: the ending.
+	lake.melt_everything()
+	await _frames(2)
+	check(won[0] and gs.has_won, "melting the frozen lake wins")
+	check(not gs.discovered.has(false), "every find was discovered")
 
 	# --- Game state save round trip.
 	gs.save_game()
@@ -447,7 +510,8 @@ func _run() -> void:
 	gs.reset_state()
 	gs.load_game()
 	check(gs.has_won and gs.tool_index == 1 and absf(gs.water - water_saved) < 0.01, "save/load round trip")
-	check(gs.glacier_data.begins_with("v3:"), "glacier stored in the save (%d KB)" % (gs.glacier_data.length() / 1024))
+	check(gs.stage == 1 and gs.glacier_saves.size() == 2 and gs.glacier_saves[0] == "gone" and str(gs.glacier_saves[1]).begins_with("v3:"),
+		"glaciers stored in the save (%d KB)" % (str(gs.glacier_saves[1]).length() / 1024))
 
 	# --- Start over: a fresh valley.
 	gs.wipe_save()

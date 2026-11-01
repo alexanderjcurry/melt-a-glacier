@@ -1,28 +1,41 @@
 class_name Balance
 extends RefCounted
 ## All tunable game numbers for the first-person glacier game live here.
+## Pacing: tests/pacing.gd plays a whole run and prints how long each part took.
 
-# --- Glacier grid ----------------------------------------------------------------
-# The glacier is a grid of 1 m ice blocks. Cell (0,0,0)'s corner sits at GRID_ORIGIN.
-const BLOCK := 1.0
-const GRID_X := 34
-const GRID_Z := 30
-const GRID_Y := 8
-const GRID_ORIGIN := Vector3(-17.0, 0.0, -25.0)
 const WORLD_SEED := 20261101
 
-# Ice layers by depth below the glacier's original surface (0 = surface).
-# Deeper ice is older, harder (hp) and worth more meltwater (hp x sell bonus).
-const LAYERS = [
-	{"name": "Fresh Snow", "hp": 1.0, "color": Color(0.88, 0.94, 1.0)},
-	{"name": "Crunchy Firn", "hp": 2.0, "color": Color(0.78, 0.89, 0.99)},
-	{"name": "Slushy Ice", "hp": 4.0, "color": Color(0.66, 0.84, 0.98)},
-	{"name": "Blue Ice", "hp": 8.0, "color": Color(0.5, 0.76, 0.96)},
-	{"name": "Old Blue Ice", "hp": 16.0, "color": Color(0.38, 0.67, 0.93)},
-	{"name": "Glacial Ice", "hp": 32.0, "color": Color(0.28, 0.57, 0.88)},
-	{"name": "Ancient Ice", "hp": 64.0, "color": Color(0.2, 0.46, 0.8)},
-	{"name": "The Last Chunk", "hp": 128.0, "color": Color(0.14, 0.34, 0.68)},
-]
+# Ice layers by depth below a glacier's original surface (0 = the top), each
+# layer_depth thick (see Levels). Deeper ice is older and much harder (hp),
+# and worth that much more meltwater per m³: each new tool opens up the next
+# layer or two, and the hair dryer barely scratches Glacial Ice. Each glacier
+# names its set; the frozen lake's ice comes in colours you won't see in the valley.
+const LAYER_SETS = {
+	"valley": [
+		{"name": "Fresh Snow", "hp": 1.0, "color": Color(0.88, 0.94, 1.0)},
+		{"name": "Crunchy Firn", "hp": 2.5, "color": Color(0.78, 0.89, 0.99)},
+		{"name": "Slushy Ice", "hp": 6.0, "color": Color(0.66, 0.84, 0.98)},
+		{"name": "Blue Ice", "hp": 15.0, "color": Color(0.5, 0.76, 0.96)},
+		{"name": "Old Blue Ice", "hp": 40.0, "color": Color(0.38, 0.67, 0.93)},
+		{"name": "Glacial Ice", "hp": 100.0, "color": Color(0.28, 0.57, 0.88)},
+		{"name": "Ancient Ice", "hp": 250.0, "color": Color(0.2, 0.46, 0.8)},
+		{"name": "Ice Age Ice", "hp": 500.0, "color": Color(0.16, 0.37, 0.72)},
+		{"name": "Dinosaur Ice", "hp": 1100.0, "color": Color(0.17, 0.29, 0.64)},
+		{"name": "The Last Chunk", "hp": 2500.0, "color": Color(0.2, 0.22, 0.55)},
+	],
+	"lake": [
+		{"name": "Lake Snow", "hp": 10.0, "color": Color(0.9, 0.96, 1.0)},
+		{"name": "Hoarfrost", "hp": 30.0, "color": Color(0.8, 0.95, 0.98)},
+		{"name": "Clear Lake Ice", "hp": 90.0, "color": Color(0.62, 0.9, 0.95)},
+		{"name": "Turquoise Ice", "hp": 250.0, "color": Color(0.36, 0.82, 0.86)},
+		{"name": "Jade Ice", "hp": 700.0, "color": Color(0.3, 0.72, 0.62)},
+		{"name": "Black Ice", "hp": 1500.0, "color": Color(0.22, 0.32, 0.4)},
+		{"name": "Moonstone Ice", "hp": 4500.0, "color": Color(0.6, 0.58, 0.82)},
+		{"name": "Midnight Ice", "hp": 11000.0, "color": Color(0.3, 0.24, 0.6)},
+		{"name": "Starlight Ice", "hp": 26000.0, "color": Color(0.42, 0.22, 0.62)},
+		{"name": "The Lake's Heart", "hp": 60000.0, "color": Color(0.62, 0.2, 0.5)},
+	],
+}
 
 # --- Player -------------------------------------------------------------------------
 const WALK_SPEED := 4.5         # m/s
@@ -43,27 +56,27 @@ const JET_CEILING := 24.0        # can't fly higher than this
 const TOOLS = [
 	{"name": "Hair Dryer", "icon": "💨", "power": 2.0, "radius": 0.9, "range": 4.5, "cost": 0.0,
 		"color": Color(0.95, 0.5, 0.7), "desc": "Borrowed from your aunt."},
-	{"name": "Heat Lamp", "icon": "💡", "power": 6.0, "radius": 1.15, "range": 5.5, "cost": 100.0,
+	{"name": "Heat Lamp", "icon": "💡", "power": 6.0, "radius": 1.15, "range": 5.5, "cost": 120.0,
 		"color": Color(1.0, 0.82, 0.3), "desc": "Keeps fries and glaciers warm."},
-	{"name": "Blowtorch", "icon": "🔥", "power": 18.0, "radius": 1.4, "range": 6.5, "cost": 1200.0,
+	{"name": "Blowtorch", "icon": "🔥", "power": 18.0, "radius": 1.4, "range": 6.5, "cost": 4000.0,
 		"color": Color(0.35, 0.55, 0.95), "desc": "Crème brûlée, but it's a glacier."},
-	{"name": "Flamethrower", "icon": "🐉", "power": 55.0, "radius": 1.8, "range": 9.0, "cost": 12000.0,
+	{"name": "Flamethrower", "icon": "🐉", "power": 55.0, "radius": 1.8, "range": 9.0, "cost": 100000.0,
 		"color": Color(0.9, 0.35, 0.15), "desc": "Probably needs a permit."},
-	{"name": "Lava Hose", "icon": "🌋", "power": 160.0, "radius": 2.3, "range": 11.0, "cost": 90000.0,
+	{"name": "Lava Hose", "icon": "🌋", "power": 160.0, "radius": 2.3, "range": 11.0, "cost": 3000000.0,
 		"color": Color(0.85, 0.2, 0.1), "desc": "Garden hose, but lava."},
-	{"name": "Orbital Mirror", "icon": "🛰️", "power": 450.0, "radius": 3.2, "range": 45.0, "cost": 450000.0,
+	{"name": "Orbital Mirror", "icon": "🛰️", "power": 450.0, "radius": 3.2, "range": 45.0, "cost": 30000000.0,
 		"color": Color(0.85, 0.9, 1.0), "desc": "A magnifying glass in space."},
 ]
 
 # Shed upgrades. Effect = 1 + per_level * level. Cost = base * growth^level.
 const UPGRADES = [
-	{"key": "heat", "name": "Heat Output", "icon": "🌡️", "base": 20.0, "growth": 1.55, "per_level": 0.25, "max": 30,
+	{"key": "heat", "name": "Heat Output", "icon": "🌡️", "base": 25.0, "growth": 1.85, "per_level": 0.25, "max": 25,
 		"desc": "+25% melting power"},
-	{"key": "nozzle", "name": "Wider Nozzle", "icon": "📏", "base": 60.0, "growth": 1.8, "per_level": 0.1, "max": 12,
-		"desc": "+10% heat zone size"},
+	{"key": "nozzle", "name": "Wider Nozzle", "icon": "📏", "base": 100.0, "growth": 2.8, "per_level": 0.07, "max": 10,
+		"desc": "+7% heat zone size"},
 	{"key": "reach", "name": "Longer Reach", "icon": "🎯", "base": 40.0, "growth": 1.7, "per_level": 0.12, "max": 12,
 		"desc": "+12% melting range"},
-	{"key": "sell", "name": "Steam Sell", "icon": "💧", "base": 90.0, "growth": 1.75, "per_level": 0.15, "max": 25,
+	{"key": "sell", "name": "Steam Sell", "icon": "💧", "base": 100.0, "growth": 1.9, "per_level": 0.15, "max": 20,
 		"desc": "+15% meltwater per block"},
 	{"key": "boots", "name": "Crampon Boots", "icon": "🥾", "base": 50.0, "growth": 2.2, "per_level": 0.1, "max": 8,
 		"desc": "+10% walking speed"},
@@ -72,31 +85,44 @@ const UPGRADES = [
 ]
 
 # Helpers melt on their own. Penguins and the sauna crew waddle around on the
-# ice; the volcano lobs lava bombs. power = hp per second each.
+# ice; the volcano lobs lava bombs. power = hp x m³ of ice each one melts per
+# second (water per second at x1 sell), less on soft snow where heat is wasted.
 const HELPER_GROWTH := 1.2
 const HELPERS = [
-	{"key": "penguin", "name": "Penguin with Tiny Torch", "icon": "🐧", "power": 0.8, "base": 40.0,
+	{"key": "penguin", "name": "Penguin with Tiny Torch", "icon": "🐧", "power": 0.5, "base": 30.0,
 		"desc": "Waddles around melting the surface."},
-	{"key": "sauna", "name": "Sauna Crew", "icon": "🧖", "power": 6.0, "base": 900.0,
+	{"key": "sauna", "name": "Sauna Crew", "icon": "🧖", "power": 6.0, "base": 600.0,
 		"desc": "Very relaxed. Very hot."},
-	{"key": "volcano", "name": "Adopted Volcano", "icon": "🌋", "power": 45.0, "base": 15000.0,
+	{"key": "volcano", "name": "Adopted Volcano", "icon": "🌋", "power": 150.0, "base": 25000.0,
 		"desc": "Lobs lava bombs at the ice. You named it Kevin."},
 ]
 const MAX_VISIBLE_WALKERS := 18   # per helper type; more helpers just work harder
+# When the village is free your helpers retire, and the crew you hire for the
+# frozen lake is this many times stronger, and pricier (one entry per glacier).
+const HELPER_STAGE_POWER := [1.0, 200.0]
+const HELPER_STAGE_COST := [1.0, 600.0]
 
-# Buried things, placed at a depth (layer). Each sells for a burst of meltwater.
+# Buried things, frozen at a depth (layer) in one of the glaciers (0 = the
+# village glacier, 1 = the frozen lake). Each sells for a burst of meltwater.
 const DISCOVERIES = [
-	{"name": "Lost Mitten", "icon": "🧤", "layer": 1, "value": 25.0, "flavor": "Still damp. Somehow."},
-	{"name": "Frozen Pizza", "icon": "🍕", "layer": 2, "value": 80.0, "flavor": "Best before 1987."},
-	{"name": "Mixtape", "icon": "📼", "layer": 2, "value": 120.0, "flavor": "Side B is all whale songs."},
-	{"name": "Lost Snowmobile", "icon": "🛷", "layer": 3, "value": 400.0, "flavor": "Keys still in it."},
-	{"name": "Frozen Mammoth", "icon": "🦣", "layer": 4, "value": 1500.0, "flavor": "He looks annoyed."},
-	{"name": "Viking Helmet", "icon": "🪖", "layer": 4, "value": 1800.0, "flavor": "No horns. Historians were right."},
-	{"name": "1970s Caveman", "icon": "🕺", "layer": 5, "value": 6000.0, "flavor": "Thawed out mid-dance move."},
-	{"name": "Prehistoric Fish", "icon": "🐟", "layer": 5, "value": 7000.0, "flavor": "Do not microwave."},
-	{"name": "Yeti's Phone", "icon": "📱", "layer": 6, "value": 25000.0, "flavor": "4,812 unread messages."},
-	{"name": "Message in a Bottle", "icon": "🍾", "layer": 6, "value": 30000.0, "flavor": "It says 'help, cold'."},
-	{"name": "Dinosaur Egg", "icon": "🥚", "layer": 7, "value": 90000.0, "flavor": "It's warm now. Uh oh."},
+	{"name": "Lost Mitten", "icon": "🧤", "glacier": 0, "layer": 1, "value": 30.0, "flavor": "Still damp. Somehow."},
+	{"name": "Frozen Pizza", "icon": "🍕", "glacier": 0, "layer": 2, "value": 150.0, "flavor": "Best before 1987."},
+	{"name": "Mixtape", "icon": "📼", "glacier": 0, "layer": 2, "value": 200.0, "flavor": "Side B is all whale songs."},
+	{"name": "Lost Snowmobile", "icon": "🛷", "glacier": 0, "layer": 3, "value": 700.0, "flavor": "Keys still in it."},
+	{"name": "Viking Helmet", "icon": "🪖", "glacier": 0, "layer": 4, "value": 2000.0, "flavor": "No horns. Historians were right."},
+	{"name": "1970s Caveman", "icon": "🕺", "glacier": 0, "layer": 5, "value": 4000.0, "flavor": "Thawed out mid-dance move."},
+	{"name": "Message in a Bottle", "icon": "🍾", "glacier": 0, "layer": 5, "value": 4500.0, "flavor": "It says 'help, cold'."},
+	{"name": "Yeti's Phone", "icon": "📱", "glacier": 0, "layer": 6, "value": 10000.0, "flavor": "4,812 unread messages."},
+	{"name": "Frozen Mammoth", "icon": "🦣", "glacier": 0, "layer": 7, "value": 20000.0, "flavor": "He looks annoyed."},
+	{"name": "Prehistoric Fish", "icon": "🐟", "glacier": 0, "layer": 8, "value": 35000.0, "flavor": "Do not microwave."},
+	{"name": "Dinosaur Egg", "icon": "🥚", "glacier": 0, "layer": 9, "value": 70000.0, "flavor": "It's warm now. Uh oh."},
+	{"name": "Ice Skater", "icon": "⛸️", "glacier": 1, "layer": 1, "value": 8000.0, "flavor": "Mid-spin since 1952. Very dizzy."},
+	{"name": "Rowboat", "icon": "🚣", "glacier": 1, "layer": 2, "value": 25000.0, "flavor": "Someone really wanted to go fishing."},
+	{"name": "Pirate Treasure", "icon": "💰", "glacier": 1, "layer": 3, "value": 80000.0, "flavor": "Wrong ocean. Very wrong ocean."},
+	{"name": "Frozen Whale", "icon": "🐋", "glacier": 1, "layer": 5, "value": 200000.0, "flavor": "Nobody knows how he got into a lake."},
+	{"name": "Lake Monster", "icon": "🦕", "glacier": 1, "layer": 6, "value": 500000.0, "flavor": "Real. Shy. Would like a towel."},
+	{"name": "Crashed UFO", "icon": "🛸", "glacier": 1, "layer": 8, "value": 3000000.0, "flavor": "They came for the ice. They stayed."},
+	{"name": "The Sun's Lost Ray", "icon": "🌟", "glacier": 1, "layer": 9, "value": 8000000.0, "flavor": "So that's where summer went."},
 ]
 
 # --- Boosts, ads -----------------------------------------------------------------------
@@ -108,5 +134,10 @@ const INTERSTITIAL_COOLDOWN := 240.0
 const INTERSTITIAL_MIN_PROGRESS := 0.15  # no interstitials before 15% of the ice is gone
 
 
-static func layer_hp(layer: int) -> float:
-	return float(LAYERS[clampi(layer, 0, LAYERS.size() - 1)].hp)
+static func finds_in(glacier: int) -> Array:
+	## Indices into DISCOVERIES frozen in this glacier.
+	var out: Array = []
+	for d in DISCOVERIES.size():
+		if int(DISCOVERIES[d].glacier) == glacier:
+			out.append(d)
+	return out

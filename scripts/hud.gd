@@ -338,15 +338,17 @@ func _refresh() -> void:
 	var left := grid.fraction_left() if grid != null else 1.0
 	ice_bar.value = 1.0 - left
 	if GameState.has_won:
-		ice_label.text = "The glacier is gone. Summer is back! ☀️"
+		ice_label.text = "The lake is free. Summer is back! ☀️"
 	else:
-		ice_label.text = "Glacier melted: %d%%  ·  %s m³ of ice left" % [int(floor((1.0 - left) * 100.0)), Fmt.num(grid.volume_left())]
+		var what: String = str(grid.spec.get("title", "Glacier")) if grid != null else "Glacier"
+		ice_label.text = "%s: %d%% melted  ·  %s m³ of ice left" % [what, int(floor((1.0 - left) * 100.0)), Fmt.num(grid.volume_left())]
 	var t: Dictionary = player.target
 	if shop_card.visible:
 		target_label.text = ""
 	elif t.hit:
-		var l := grid.layer_at(t.pos - t.normal * 0.3)
-		target_label.text = "%s  ·  💧%s per m³" % [Balance.LAYERS[l].name, Fmt.num(GameState.block_value(l))]
+		var g: IceField = t.grid
+		var l := g.layer_at(t.pos - t.normal * 0.3)
+		target_label.text = "%s  ·  💧%s per m³" % [g.layer_name(l), Fmt.num(GameState.layer_value(g, l))]
 	elif _too_far:
 		target_label.text = "Too far away. Walk closer"
 	else:
@@ -654,11 +656,11 @@ func _build_catalogue_rows() -> void:
 		_row_refreshers.append(func(): speed.set_button("x%d" % int(GameState.debug_speed), true))
 		speed.button.pressed.connect(func():
 			GameState.debug_speed = 1.0 if GameState.debug_speed >= 100.0 else GameState.debug_speed * 10.0)
-		var melt := _row("☀️", "Melt everything", "Skip straight to the ending.")
+		var melt := _row("☀️", "Melt this glacier", "Skip to the next glacier (or the ending).")
 		melt.set_button("Melt", true)
 		melt.button.pressed.connect(func():
 			close_catalogue()
-			grid.melt_everything())
+			GameState.grid.melt_everything())
 		var wipe := _row("🗑️", "Start over", "New glacier, keeps purchases.")
 		wipe.set_button("Wipe", true)
 		wipe.button.pressed.connect(func():
@@ -722,6 +724,17 @@ func _close_popup(p: Dictionary) -> void:
 		touch.visible = touch_mode
 
 
+func show_stage_done(stage: int) -> void:
+	## A glacier is gone and the next one opens up (so far: the village is free,
+	## on to the frozen lake).
+	if catalogue_open:
+		close_catalogue()
+	var next: String = str(GameState.grids[stage].spec.get("name", "the next glacier")) if stage < GameState.grids.size() else "the next glacier"
+	var body := "Everyone's home again, and your helpers have earned a holiday: they're partying in the village square.\n\nBut look past the fence. The whole lake froze solid, and the gate is open now.\nHire a new crew at the shed and go melt %s!" % next
+	var p := _popup("🏘️ The village is free! 🎉", body)
+	_popup_button(p, "To the lake!", Color(0.25, 0.5, 0.85), func(): _close_popup(p))
+
+
 func show_ending() -> void:
 	if _ending_shown:
 		return
@@ -732,7 +745,7 @@ func show_ending() -> void:
 	for d in GameState.discovered:
 		if d:
 			found += 1
-	var body := "The last chunk dripped away and the village is free.\nSummer is back!\n\n⏱ %s played\n🧊 %s m³ of ice melted\n💧 %s meltwater earned\n🏺 %d/%d finds\n\n(Screenshot this!)" % [
+	var body := "The last chunk dripped away and the lake is free.\nSummer is back!\n\n⏱ %s played\n🧊 %s m³ of ice melted\n💧 %s meltwater earned\n🏺 %d/%d finds\n\n(Screenshot this!)" % [
 		Fmt.duration(GameState.play_time), Fmt.num(GameState.melted_cubic_metres()), Fmt.num(GameState.lifetime_water),
 		found, Balance.DISCOVERIES.size()]
 	var p := _popup("☀️ THE END ☀️", body)

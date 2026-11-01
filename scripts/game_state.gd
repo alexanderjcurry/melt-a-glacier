@@ -1,13 +1,16 @@
 extends Node
 ## Autoload "GameState": meltwater, tools, upgrades, helpers, finds, and saving.
-## The glacier itself lives in IceField; its state is saved through here.
+## The glaciers themselves live in IceFields; their state is saved through here.
+## A level's glaciers are melted one after another (`stage`): the village
+## glacier, then the frozen lake. You win when the last one is gone.
 
 signal changed                                   # anything changed; UI should refresh
 signal discovered_item(index: int, value: float)
+signal stage_changed(stage: int)                 # a glacier is gone and the next one opens up
 signal won
 
 const SAVE_PATH := "user://save3d.json"
-const SAVE_VERSION := 3            # 3 = smooth ice. Older saves start a fresh glacier.
+const SAVE_VERSION := 4            # 4 = the bigger valley + the frozen lake. Older saves start fresh.
 const AUTOSAVE_INTERVAL := 10.0
 
 # --- Saved state ----------------------------------------------------------------
@@ -17,7 +20,8 @@ var tool_index: int = 0
 var upgrade_levels: Dictionary = {}    # key -> level
 var helper_counts: Array = []          # index -> owned
 var discovered: Array = []             # index -> bool
-var blocks_melted: int = 0              # grid points of ice melted (8 per cubic metre)
+var melted_volume: float = 0.0         # m³ of ice melted, all glaciers
+var stage: int = 0                     # which glacier you're melting (index into the level's glaciers)
 var boost_until: float = 0.0
 var owns_remove_ads_2x: bool = false   # IAP
 var owns_golden_dryer: bool = false    # IAP (cosmetic)
@@ -27,11 +31,12 @@ var has_won: bool = false
 var player_pos: Vector3 = Vector3.INF  # INF = use the spawn point
 var player_yaw: float = 0.0
 var player_pitch: float = -0.15
-var glacier_data: String = ""          # IceField.to_save_string()
+var glacier_saves: Array = []          # IceField.to_save_string() per glacier ("" = untouched)
 var tutorial_step: int = 0             # onboarding hints (World._update_coach)
 
 # --- Runtime only -------------------------------------------------------------------
-var grid: IceField                     # set by the world when it's built
+var grid: IceField                     # the glacier you're melting now (set by the world)
+var grids: Array = []                  # every glacier in the level, in order
 var player: Node3D
 var debug_speed: float = 1.0           # dev menu multiplier
 var _autosave_timer: float = 0.0
@@ -57,7 +62,8 @@ func reset_state(keep_purchases: bool = false) -> void:
 	discovered = []
 	for _d in Balance.DISCOVERIES:
 		discovered.append(false)
-	blocks_melted = 0
+	melted_volume = 0.0
+	stage = 0
 	boost_until = 0.0
 	play_time = 0.0
 	has_won = false
@@ -67,7 +73,7 @@ func reset_state(keep_purchases: bool = false) -> void:
 	player_pos = Vector3.INF
 	player_yaw = 0.0
 	player_pitch = -0.15
-	glacier_data = ""
+	glacier_saves = []
 	tutorial_step = 0
 
 
@@ -129,9 +135,19 @@ func sell_mult() -> float:
 	return upgrade_mult("sell")
 
 
+func _stage_entry(list: Array) -> float:
+	return float(list[clampi(stage, 0, list.size() - 1)])
+
+
+func helper_each(i: int) -> float:
+	## hp per second from one helper of type i. The lake crew is much
+	## stronger (and pricier) than the village crew.
+	return float(Balance.HELPERS[i].power) * _stage_entry(Balance.HELPER_STAGE_POWER) * global_mult() * debug_speed
+
+
 func helper_power(i: int) -> float:
 	## Total hp per second from all helpers of type i.
-	return float(Balance.HELPERS[i].power) * float(helper_counts[i]) * global_mult() * debug_speed
+	return helper_each(i) * float(helper_counts[i])
 
 
 func total_helper_power() -> float:
@@ -141,13 +157,13 @@ func total_helper_power() -> float:
 	return p
 
 
-func block_value(layer: int) -> float:
-	## Meltwater for a cubic metre of this layer.
-	return Balance.layer_hp(layer) * sell_mult()
+func layer_value(g: IceField, layer: int) -> float:
+	## Meltwater for a cubic metre of this layer of that glacier.
+	return g.layer_hp(layer) * sell_mult()
 
 
 func melted_cubic_metres() -> float:
-	return float(blocks_melted) * IceField.POINT_VOLUME
+	return melted_volume
 
 
 func is_boost_active() -> bool:
@@ -159,10 +175,10 @@ func boost_seconds_left() -> float:
 
 
 # --- Earning ------------------------------------------------------------------------------
-func on_ice_melted(points: int, hp: float) -> float:
-	## `points` bits of ice (1/8 m3 each) just melted; `hp` is their layers' hp added up.
-	var v := hp * sell_mult() * IceField.POINT_VOLUME
-	blocks_melted += points
+func on_ice_melted(volume: float, value: float) -> float:
+	## `volume` m³ of ice just melted; `value` is their layers' hp x m³.
+	var v := value * sell_mult()
+	melted_volume += volume
 	water += v
 	lifetime_water += v
 	changed.emit()
@@ -185,7 +201,18 @@ func discover(i: int) -> void:
 
 
 func check_win() -> void:
+	## The glacier you're on is gone: on to the next one, or that's the game.
 	if has_won or grid == null or grid.remaining > 0:
+		return
+	if stage < grids.size() - 1:
+		stage += 1
+		grid = grids[stage]
+		# Your helpers retire; hire a new crew for the next glacier.
+		for i in helper_counts.size():
+			helper_counts[i] = 0
+		save_game()
+		stage_changed.emit(stage)
+		changed.emit()
 		return
 	has_won = true
 	save_game()
@@ -239,7 +266,7 @@ func buy_upgrade(key: String) -> bool:
 
 
 func helper_cost(i: int) -> float:
-	return float(Balance.HELPERS[i].base) * pow(Balance.HELPER_GROWTH, float(helper_counts[i]))
+	return float(Balance.HELPERS[i].base) * _stage_entry(Balance.HELPER_STAGE_COST) * pow(Balance.HELPER_GROWTH, float(helper_counts[i]))
 
 
 func buy_helper(i: int) -> bool:
@@ -267,8 +294,16 @@ func _notification(what: int) -> void:
 
 # --- Save / load -------------------------------------------------------------------
 func to_dict() -> Dictionary:
-	if grid != null:
-		glacier_data = grid.to_save_string()
+	if not grids.is_empty():
+		glacier_saves.resize(grids.size())
+		for g in grids.size():
+			var field: IceField = grids[g]
+			if g < stage:
+				glacier_saves[g] = "gone"            # melted: nothing to store
+			elif g > stage:
+				glacier_saves[g] = ""                # not started yet
+			else:
+				glacier_saves[g] = field.to_save_string()
 	if player != null:
 		player_pos = player.position
 		player_yaw = player.yaw
@@ -281,7 +316,8 @@ func to_dict() -> Dictionary:
 		"upgrade_levels": upgrade_levels,
 		"helper_counts": helper_counts,
 		"discovered": discovered,
-		"blocks_melted": blocks_melted,
+		"melted_volume": melted_volume,
+		"stage": stage,
 		"boost_until": boost_until,
 		"owns_remove_ads_2x": owns_remove_ads_2x,
 		"owns_golden_dryer": owns_golden_dryer,
@@ -291,7 +327,7 @@ func to_dict() -> Dictionary:
 		"player_pos": [player_pos.x, player_pos.y, player_pos.z] if player_pos.is_finite() else [],
 		"player_yaw": player_yaw,
 		"player_pitch": player_pitch,
-		"glacier": glacier_data,
+		"glaciers": glacier_saves,
 		"tutorial_step": tutorial_step,
 	}
 
@@ -314,8 +350,8 @@ func load_game() -> void:
 	owns_remove_ads_2x = bool(data.get("owns_remove_ads_2x", false))
 	owns_golden_dryer = bool(data.get("owns_golden_dryer", false))
 	golden_equipped = bool(data.get("golden_equipped", false)) and owns_golden_dryer
-	if int(data.get("version", 0)) < 3:
-		return   # the old blocky glacier: start the smooth one fresh, keep purchases
+	if int(data.get("version", 0)) < 4:
+		return   # an older, smaller valley: start the new one fresh, keep purchases
 	water = float(data.get("water", 0.0))
 	lifetime_water = float(data.get("lifetime_water", 0.0))
 	tool_index = clampi(int(data.get("tool_index", 0)), 0, Balance.TOOLS.size() - 1)
@@ -328,7 +364,8 @@ func load_game() -> void:
 	var dc: Array = data.get("discovered", [])
 	for i in discovered.size():
 		discovered[i] = bool(dc[i]) if i < dc.size() else false
-	blocks_melted = int(data.get("blocks_melted", 0))
+	melted_volume = float(data.get("melted_volume", 0.0))
+	stage = maxi(0, int(data.get("stage", 0)))
 	boost_until = float(data.get("boost_until", 0.0))
 	play_time = float(data.get("play_time", 0.0))
 	has_won = bool(data.get("has_won", false))
@@ -336,7 +373,7 @@ func load_game() -> void:
 	player_pos = Vector3(float(pp[0]), float(pp[1]), float(pp[2])) if pp.size() == 3 else Vector3.INF
 	player_yaw = float(data.get("player_yaw", 0.0))
 	player_pitch = float(data.get("player_pitch", -0.15))
-	glacier_data = str(data.get("glacier", ""))
+	glacier_saves = data.get("glaciers", [])
 	tutorial_step = int(data.get("tutorial_step", 0))
 
 
@@ -344,6 +381,7 @@ func wipe_save() -> void:
 	## Start a fresh glacier (keeps purchases). The world rebuilds itself.
 	reset_state(true)
 	grid = null
+	grids = []
 	player = null
 	var f := FileAccess.open(SAVE_PATH, FileAccess.WRITE)
 	if f != null:

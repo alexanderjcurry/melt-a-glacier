@@ -3,27 +3,35 @@ extends Node3D
 ## Helpers you buy at the shed. Penguins and the sauna crew wander around on
 ## top of the ice, melting a thin layer as they walk (so the glacier wears
 ## down evenly instead of getting dug full of holes). Kevin the adopted
-## volcano lobs lava bombs (and keeps an eye on you).
+## volcano lobs lava bombs (and keeps an eye on you). When a glacier is gone
+## the crew retires and parties where they stand; you hire a new crew for the
+## next glacier.
 
 const WALKER_TYPES := [0, 1]           # indices into Balance.HELPERS that walk
 const VOLCANO_TYPE := 2
 const VOLCANO_POS := Vector3(-30.0, 13.0, -47.0)   # in his hollow, clear of the path behind the glacier
-const WALK_SPEED := [1.2, 0.95]        # m/s, per walker type
+const WALK_SPEED := [1.2, 1.1]         # m/s, per walker type
 # Their heat lands in a few small, shallow spots scattered around them (the
 # sauna crew's hot stones warm a wide circle), so the ice wears down a little
 # everywhere they go instead of in one deep hole.
-const SPREAD := [0.9, 2.2]             # radius of the circle the heat lands in
+const SPREAD := [0.9, 3.2]             # radius of the circle the heat lands in
 const SPOT_RADIUS := [0.6, 0.75]
-const SPOTS := [2, 5]                  # spots per pulse
-const OLD_RADIUS := [0.7, 1.0]         # the heat zone their power was tuned for (keeps the hp/s the same)
+const SPOTS := [2, 8]                  # spots per pulse
 const MELT_PULSE := 0.25               # heat is saved up and put down this often (seconds)
-const HEAT_SHARE := 0.2                # they melt nonstop now, so each step gets less (about the same pace as before)
+# A helper's power is the hp x m³ of ice it melts per second (= water per second
+# at x1 sell), as long as the ice isn't so soft that the heat is wasted. A ball
+# of heat `a` with radius r melts about WORK x a x r³ of that (IceField.damage_sphere):
+const WALK_WORK := 2.76                # ball centred just above the surface
+const BOMB_WORK := 4.3                 # ball centred 0.4 m into the ice
+const BOMB_RADIUS := 1.7
 const DROP := 0.6                      # won't step down more than this per 0.6 m (into a hole)
 const CLIMB := 1.1                     # or climb more than this
 
 var grid: IceField
 var player: Node3D                     # Kevin watches you
 var _walkers: Array = []               # {type, node, body, pos, target, t, heat, pulse, fx}
+var _retired: Array = []               # the old crew, partying in the village
+const MAX_RETIRED := 14
 var _bombs: Array = []                 # {node, from, to, t, dur, damage}
 var _bomb_timer := 0.0
 var _rng := RandomNumberGenerator.new()
@@ -43,11 +51,32 @@ func _process(delta: float) -> void:
 	_sync_walkers()
 	for w in _walkers:
 		_update_walker(w, delta)
+	for w in _retired:
+		w.t += delta * 7.0
+		var pos: Vector3 = w.pos
+		(w.node as Node3D).position = Vector3(pos.x, absf(sin(w.t)) * 0.35, pos.z)
+		_pose(w, 1.0, 0.0, true)
 	_update_volcano(delta)
 	_update_bombs(delta)
 
 
 # --- Walkers --------------------------------------------------------------------------------
+func retire() -> void:
+	## The glacier's gone: this crew stops working and parties where they are
+	## (a few of them, anyway). Kevin dozes off until you adopt him again.
+	for w in _walkers:
+		(w.fx as CPUParticles3D).emitting = false
+		if _retired.size() < MAX_RETIRED:
+			var pos: Vector3 = w.pos
+			w.pos = Vector3(pos.x, 0.0, pos.z)
+			_retired.append(w)
+		else:
+			(w.node as Node3D).queue_free()
+	_walkers.clear()
+	if _smoke != null:
+		_smoke.emitting = false
+
+
 func _sync_walkers() -> void:
 	for t in WALKER_TYPES:
 		var want := mini(int(GameState.helper_counts[t]), Balance.MAX_VISIBLE_WALKERS)
@@ -173,11 +202,10 @@ func _update_walker(w: Dictionary, delta: float) -> void:
 		w.heat += power * delta
 		w.pulse += delta
 		if w.pulse >= MELT_PULSE:
-			var r: float = SPOT_RADIUS[t]
+			var r: float = maxf(SPOT_RADIUS[t], grid.res * 1.15)   # (a coarse grid needs a bigger spot to hit anything)
 			var n: int = SPOTS[t]
 			var spread: float = SPREAD[t]
-			# Heat per spot: the zone size changed, so scale to keep the same total.
-			var amount: float = w.heat * HEAT_SHARE * pow(float(OLD_RADIUS[t]) / r, 3.0) / float(n)
+			var amount: float = w.heat / (WALK_WORK * r * r * r * float(n))
 			var ahead_c := Vector3(pos.x, 0.0, pos.z) - node.global_transform.basis.z * spread * 0.4
 			for _k in n:
 				var a := _rng.randf() * TAU
@@ -258,12 +286,16 @@ func _pose(w: Dictionary, walk: float, work: float, party: bool) -> void:
 func _update_volcano(delta: float) -> void:
 	var count := int(GameState.helper_counts[VOLCANO_TYPE])
 	if count <= 0:
-		if _volcano != null:
+		if _volcano != null and GameState.stage == 0:   # (after a fresh start)
 			_volcano.queue_free()
 			_volcano = null
+		elif _volcano != null:
+			_look_at_player()   # retired, but still watching you
 		return
 	if _volcano == null:
 		_build_volcano()
+	if not _smoke.emitting:
+		_smoke.emitting = true
 	_look_at_player()
 	if GameState.has_won or grid.remaining <= 0:
 		return
@@ -274,7 +306,7 @@ func _update_volcano(delta: float) -> void:
 		_bomb_timer = 0.0
 		var p := grid.random_surface_point(_rng)
 		if p != Vector3.INF:
-			_launch_bomb(p, GameState.helper_power(VOLCANO_TYPE) * interval)
+			_launch_bomb(p, GameState.helper_power(VOLCANO_TYPE) * interval / (BOMB_WORK * pow(BOMB_RADIUS, 3.0)))
 
 
 func _build_volcano() -> void:
@@ -337,7 +369,9 @@ func _launch_bomb(to: Vector3, damage: float) -> void:
 	trail.emitting = true
 	var from := VOLCANO_POS + Vector3(0, 0.5, 0)
 	node.position = from
-	_bombs.append({"node": node, "from": from, "to": to, "t": 0.0, "dur": 1.8, "damage": damage})
+	var far := from.distance_to(to)   # the lake is a long way off: higher, slower lobs
+	_bombs.append({"node": node, "from": from, "to": to, "t": 0.0, "dur": clampf(far / 28.0, 1.8, 5.0),
+		"arc": clampf(far * 0.3, 14.0, 40.0), "damage": damage})
 
 
 func _update_bombs(delta: float) -> void:
@@ -347,11 +381,11 @@ func _update_bombs(delta: float) -> void:
 		var from: Vector3 = b.from
 		var to: Vector3 = b.to
 		var p := from.lerp(to, k)
-		p.y += sin(k * PI) * 14.0
+		p.y += sin(k * PI) * float(b.arc)
 		var node: MeshInstance3D = b.node
 		node.position = p
 		if k >= 1.0:
-			grid.damage_sphere(to + Vector3(0, -0.4, 0), 1.7, b.damage)
+			grid.damage_sphere(to + Vector3(0, -0.4, 0), BOMB_RADIUS, b.damage)
 			_puff(to)
 			node.queue_free()
 			_bombs.erase(b)

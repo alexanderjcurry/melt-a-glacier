@@ -1,8 +1,10 @@
 class_name World
 extends Node3D
-## The valley. Builds the 3D scene in code (sky, mountains, the glacier, the
-## village frozen inside it, the shed), then wires up the player, the helpers,
-## the HUD and the controls.
+## The valley. Builds the 3D scene in code (sky, mountains, the glaciers, the
+## village frozen inside the first one, the shed, the fence in front of the
+## frozen lake), then wires up the player, the helpers, the HUD and the controls.
+## You melt the level's glaciers in order (GameState.stage): the village
+## glacier, then the frozen lake behind the gate.
 
 const SPAWN := Vector3(0.0, 0.0, 17.0)
 const SPAWN_YAW := -0.3                        # facing the glacier, shed in view on the right
@@ -25,13 +27,14 @@ const CHURCH := [-1, -17, 4, 5]            # nave: x, z, width, depth
 const CHURCH_WALL := 3.5
 const CHURCH_ROOF := 1.6
 const TOWER := [0, -12, 2, 2]              # in front of the nave
-const TOWER_TOP := 6.0                     # the spire on top pokes out of the ice
+const TOWER_TOP := 9.0                     # the spire on top pokes out of the ice
 const SPIRE := 3.8
 const VILLAGERS = ["👵", "👴", "🧒", "👩", "👨", "🐕", "🐈", "🐓"]
 const FLOWERS = ["🌼", "🌷", "🌸", "🌻"]
 
 var level: Dictionary = Levels.current()
-var grid: IceField
+var grid: IceField             # the village glacier (the first glacier)
+var glaciers: Array = []       # every glacier in the level, in the order you melt them
 var player: Player
 var helpers: HelperSwarm
 var hud: Hud
@@ -44,6 +47,12 @@ var _grass := Color(0.4, 0.62, 0.28)
 var _moraine := Color(0.55, 0.46, 0.34)
 var _mats := {}
 var _find_markers := {}        # discovery index -> Label3D
+var _find_spots := {}          # discovery index -> where it's frozen (worked out on the fresh ice)
+var _gate: Node3D              # swings open when the village is free
+var _gate_shape: CollisionShape3D
+var _gate_sign: Label3D
+var _lake_water: MeshInstance3D
+var _water_mat: Material
 var _flowers: Array = []       # {node, x, z, threshold}
 var _villagers: Array = []     # Label3D
 var _floats: Array = []        # {node, t}
@@ -81,27 +90,44 @@ func _ready() -> void:
 	var carve := _build_village()
 	_build_trees()
 
-	grid = IceField.new()
-	add_child(grid)
-	grid.generate(level, carve)
-	if GameState.glacier_data != "":
-		grid.load_save_string(GameState.glacier_data)
-	GameState.grid = grid
-	grid.ice_melted.connect(_on_ice_melted)
-	grid.find_exposed.connect(_on_find_exposed)
+	_build_fence()
+
+	# The glaciers. Each find's spot is worked out on the fresh ice (so it's the
+	# same every game), then the save is loaded on top.
+	var stage := clampi(GameState.stage, 0, level.glaciers.size() - 1)
+	GameState.stage = stage
+	for g in level.glaciers.size():
+		var field := IceField.new()
+		field.name = "Glacier%d" % g
+		field.collide = g == stage   # the ones you can't reach yet can't be hit or stood on
+		add_child(field)
+		field.generate(level.glaciers[g], int(level.seed) + 1000 * g, carve if g == 0 else [], g >= stage)
+		glaciers.append(field)
+	grid = glaciers[0]
+	GameState.grids = glaciers
+	_place_finds()
+	for g in glaciers.size():
+		var field: IceField = glaciers[g]
+		var saved := str(GameState.glacier_saves[g]) if g < GameState.glacier_saves.size() else ""
+		if g < stage or saved == "gone":
+			field.clear_all()
+		elif saved != "":
+			field.load_save_string(saved)
+		field.ice_melted.connect(_on_ice_melted.bind(field))
+		field.find_exposed.connect(_on_find_exposed)
+	GameState.grid = glaciers[stage]
+	GameState.stage_changed.connect(_on_stage_changed)
 	for box in solids:
 		_add_solid_shape(box)
-	_place_finds()
+	_arm_finds()
 	_build_flowers()
 	_build_villagers()
 	_build_float_pool()
 
 	player = Player.new()
-	player.grid = grid
-	# You can walk anywhere on the valley floor, all the way round the glacier.
-	var v: Dictionary = level.valley
-	player.bounds_min = Vector3(-(float(v.half_width) - 1.5), -1.0, float(v.back_z) + 1.5)
-	player.bounds_max = Vector3(float(v.half_width) - 1.5, 80.0, 20.0)
+	player.grids = glaciers
+	player.grid = GameState.grid
+	_set_bounds()
 	add_child(player)
 	var pos := GameState.player_pos if GameState.player_pos.is_finite() else SPAWN
 	pos.x = clampf(pos.x, player.bounds_min.x + 0.5, player.bounds_max.x - 0.5)
@@ -118,13 +144,13 @@ func _ready() -> void:
 	shed.player = player
 
 	helpers = HelperSwarm.new()
-	helpers.grid = grid
+	helpers.grid = GameState.grid
 	helpers.player = player
 	add_child(helpers)
 
 	hud = Hud.new()
 	hud.player = player
-	hud.grid = grid
+	hud.grid = GameState.grid
 	add_child(hud)
 	hud.respawn_requested.connect(respawn)
 
@@ -132,6 +158,11 @@ func _ready() -> void:
 	_fit_render_scale()
 
 	GameState.won.connect(_on_won)
+	if stage > 0:
+		_open_gate(false)
+		for v in _villagers:
+			(v as Node3D).visible = true
+	_set_lake_frozen(not GameState.has_won)
 	if GameState.has_won:
 		_on_won.call_deferred()
 	_update_slow()
@@ -175,9 +206,10 @@ func _watch_frame_rate(delta: float) -> void:
 
 
 func _exit_tree() -> void:
-	if GameState.grid == grid:
+	if glaciers.has(GameState.grid):
 		GameState.save_game()
 		GameState.grid = null
+		GameState.grids = []
 		GameState.player = null
 
 
@@ -307,19 +339,19 @@ func use_aimed() -> void:
 # =====================================================================================
 # Melting, finds, floating numbers
 # =====================================================================================
-func _on_ice_melted(at: Vector3, points: int, hp: float) -> void:
-	var v := GameState.on_ice_melted(points, hp)
+func _on_ice_melted(at: Vector3, volume: float, value: float, field: IceField) -> void:
+	var v := GameState.on_ice_melted(volume, value)
 	if at.is_finite() and not _in_shed:   # (the numbers show through walls)
 		_pending_water += v
 		_pending_at = at + Vector3(0, 0.4, 0)
-	if GameState.has_won:
+	if GameState.has_won or field != GameState.grid:
 		return
-	if grid.remaining <= 0:
+	if field.remaining <= 0:
 		GameState.check_win()
-	elif grid.fraction_left() < FINALE_FRACTION:
+	elif field.fraction_left() < FINALE_FRACTION:
 		# The last crumbs of the glacier collapse into slush on their own.
-		hud.toast("💦 The last of the glacier collapses into slush!")
-		grid.melt_everything.call_deferred()
+		hud.toast("💦 The last of %s collapses into slush!" % field.spec.name)
+		field.melt_everything.call_deferred()
 
 
 func _on_find_exposed(d: int) -> void:
@@ -328,43 +360,58 @@ func _on_find_exposed(d: int) -> void:
 
 
 func _place_finds() -> void:
-	## Each find is frozen at a fixed spot at its layer's depth, the same every game.
-	var rng := RandomNumberGenerator.new()
-	rng.seed = Balance.WORLD_SEED + 7
-	var spots: Array = []
-	for d in Balance.DISCOVERIES.size():
-		var want: int = Balance.DISCOVERIES[d].layer
-		var spot := Vector3.INF
-		for _t in 4000:
-			var x := rng.randf_range(-12.5, 12.5)
-			var z := rng.randf_range(-26.0, 1.0)
-			var y := grid.original_top(x, z) - (float(want) + 0.5) * IceField.LAYER_DEPTH
-			if y < 0.5:
+	## Each find is frozen at a fixed spot at its layer's depth in its glacier,
+	## the same every game: worked out on the fresh ice, before loading a save.
+	for g in glaciers.size():
+		var field: IceField = glaciers[g]
+		var box: Array = field.spec.get("finds_box", [Vector2(field.origin.x, field.origin.z), Vector2(-field.origin.x, -field.origin.z)])
+		var lo: Vector2 = box[0]
+		var hi: Vector2 = box[1]
+		var rng := RandomNumberGenerator.new()
+		rng.seed = Balance.WORLD_SEED + 7 + 100 * g
+		var spots: Array = []
+		for d in Balance.finds_in(g):
+			var want: int = Balance.DISCOVERIES[d].layer
+			var spot := Vector3.INF
+			for _t in 4000:
+				var x := rng.randf_range(lo.x, hi.x)
+				var z := rng.randf_range(lo.y, hi.y)
+				var y := field.original_top(x, z) - (float(want) + 0.5) * field.layer_depth
+				if y < 0.5:
+					continue
+				var p := Vector3(x, y, z)
+				if field.density_at(p) < 0.95:
+					continue   # in a crevasse or a house
+				var crowded := false
+				for o in spots:
+					if (o as Vector3).distance_to(p) < 3.0:
+						crowded = true
+				for b in solids:
+					if (b as AABB).grow(0.8).has_point(p):
+						crowded = true
+				if crowded:
+					continue
+				spot = p
+				break
+			if spot == Vector3.INF:
+				push_warning("No spot for find %d" % d)
 				continue
-			var p := Vector3(x, y, z)
-			if grid.density_at(p) < 0.95 and not GameState.discovered[d] and grid.remaining == grid.total:
-				continue   # in a crevasse or a house (only checkable on a fresh glacier)
-			var crowded := false
-			for o in spots:
-				if (o as Vector3).distance_to(p) < 3.0:
-					crowded = true
-			for box in solids:
-				if (box as AABB).grow(0.8).has_point(p):
-					crowded = true
-			if crowded:
-				continue
-			spot = p
-			break
-		if spot == Vector3.INF:
-			push_warning("No spot for find %d" % d)
-			continue
-		spots.append(spot)
-		var marker := _make_find_marker(d)
-		marker.position = spot
-		add_child(marker)
-		_find_markers[d] = marker
-		if GameState.discovered[d] or not grid.watch_find(spot, d):
-			# Found in an earlier session (or its ice melted while we were away).
+			spots.append(spot)
+			_find_spots[d] = spot
+			var marker := _make_find_marker(d)
+			marker.position = spot
+			marker.set_meta("glacier", g)
+			add_child(marker)
+			_find_markers[d] = marker
+
+
+func _arm_finds() -> void:
+	## After loading: finds already dug up lie where they were found; the rest
+	## wait in the ice for it to melt around them.
+	for d in _find_markers:
+		var g := int(Balance.DISCOVERIES[d].glacier)
+		var field: IceField = glaciers[g]
+		if GameState.discovered[d] or g < GameState.stage or not field.watch_find(_find_spots[d], d):
 			_reveal_find(d, false)
 			if not GameState.discovered[d]:
 				GameState.discover(d)
@@ -411,13 +458,13 @@ func _settle_finds(delta: float) -> void:
 		if not m.visible:
 			continue
 		(m.get_child(0) as Label3D).visible = m.position.distance_squared_to(player.position) < 49.0
-		var rest := _floor_under(m.position) + 0.36
+		var rest := _floor_under(m.position, glaciers[int(m.get_meta("glacier", 0))]) + 0.36
 		if m.position.y > rest + 0.001:
 			m.position.y = maxf(rest, m.position.y - delta * 5.0)
 
 
-func _floor_under(p: Vector3) -> float:
-	var floor_y := grid.floor_below(p)
+func _floor_under(p: Vector3, field: IceField) -> float:
+	var floor_y := field.floor_below(p)
 	for box in solids:
 		var b := box as AABB
 		if p.x >= b.position.x and p.x <= b.end.x and p.z >= b.position.z and p.z <= b.end.z and b.end.y <= p.y + 0.4:
@@ -514,7 +561,7 @@ func _update_coach() -> void:
 		return
 	match GameState.tutorial_step:
 		0:
-			if GameState.blocks_melted > 0:
+			if GameState.melted_volume > 0.0:
 				GameState.tutorial_step = 1
 				_coach_timer = 0.0
 			elif hud.touch_mode:
@@ -531,11 +578,175 @@ func _update_coach() -> void:
 	hud.set_coach(text)
 
 
-func _on_won() -> void:
+func _on_stage_changed(stage: int) -> void:
+	## A glacier is gone. The first time: the village is free, the gate to the
+	## frozen lake opens, and your helpers retire to the village.
+	var field: IceField = glaciers[stage]
+	field.set_collide(true)
+	player.grid = field
+	helpers.retire()
+	helpers.grid = field
+	hud.grid = field
+	_set_bounds()
+	_open_gate(true)
 	for v in _villagers:
 		(v as Node3D).visible = true
 	_update_slow()
+	hud.show_stage_done(stage)
+
+
+func _on_won() -> void:
+	for v in _villagers:
+		(v as Node3D).visible = true
+	_set_lake_frozen(false)
+	_update_slow()
 	hud.show_ending()
+
+
+# =====================================================================================
+# Where you can walk, the fence in front of the lake
+# =====================================================================================
+func _set_bounds() -> void:
+	## Before the village is free: the valley floor, up to the fence. After:
+	## the whole valley floor and the lake.
+	var v: Dictionary = level.valley
+	if GameState.stage == 0:
+		player.bounds_min = Vector3(-(float(v.half_width) - 1.5), -1.0, float(v.back_z) + 1.5)
+		player.bounds_max = Vector3(float(v.half_width) - 1.5, 80.0, float(v.gate_z) - 0.45)
+		player.walkable = Callable()
+	else:
+		var lk: Array = v.lake
+		player.bounds_min = Vector3(-200.0, -1.0, float(v.back_z) + 1.5)
+		player.bounds_max = Vector3(200.0, 80.0, float(lk[1]) + float(lk[3]) - 1.5)
+		player.walkable = walkable
+
+
+func walkable(x: float, z: float) -> bool:
+	## On the valley floor or the lake, not up in the mountains (or Kevin's hollow).
+	return Scenery.floor_distance(level.valley, x, z, Vector2.INF, Vector2.ZERO) < -1.5
+
+
+func _build_fence() -> void:
+	## A wooden fence right across the valley in front of the lake, with a gate
+	## in the middle that stays locked until the village is free.
+	var v: Dictionary = level.valley
+	var z: float = v.gate_z
+	var half := float(v.half_width) + 2.0   # into the foot of the mountains on both sides
+	var gap := 1.7                          # half the gate's width
+	var wood := Color(0.52, 0.37, 0.24)
+	var dark := wood.darkened(0.25)
+	var x := -half
+	while x <= half + 0.01:
+		if absf(x) > gap + 0.3:
+			_box(Vector3(0.16, 1.35, 0.16), Vector3(x, 0.675, z), dark)
+		x += 2.5
+	for side in [-1.0, 1.0]:
+		var x0: float = side * (gap + 0.15)
+		var x1: float = side * half
+		var mid := (x0 + x1) * 0.5
+		var len := absf(x1 - x0)
+		for y in [0.5, 1.0]:
+			_box(Vector3(len, 0.11, 0.06), Vector3(mid, y, z + 0.09), wood)
+		# Gate posts, taller, with a cap.
+		_box(Vector3(0.26, 1.8, 0.26), Vector3(side * (gap + 0.13), 0.9, z), dark)
+		_box(Vector3(0.34, 0.08, 0.34), Vector3(side * (gap + 0.13), 1.84, z), wood)
+		var lo := minf(x0, x1)
+		var fence := AABB(Vector3(lo, 0.0, z - 0.2), Vector3(len, 1.4, 0.4))
+		solids.append(fence)
+	# The gate: one leaf hinged on the left post.
+	_gate = Node3D.new()
+	_gate.position = Vector3(-gap, 0.0, z)
+	add_child(_gate)
+	var w := gap * 2.0
+	for y in [0.35, 0.8, 1.25]:
+		_box(Vector3(w, 0.12, 0.07), Vector3(w * 0.5, y, 0.0), wood, _gate)
+	for gx in [0.08, w * 0.5, w - 0.08]:
+		_box(Vector3(0.1, 1.2, 0.08), Vector3(gx, 0.8, 0.02), wood, _gate)
+	var brace := _box(Vector3(sqrt(w * w + 0.81), 0.1, 0.06), Vector3(w * 0.5, 0.8, -0.03), dark, _gate)
+	brace.rotation.z = atan2(0.9, w)
+	var lock := _box(Vector3(0.16, 0.2, 0.1), Vector3(w - 0.25, 0.8, 0.09), Color(0.75, 0.62, 0.25), _gate)
+	lock.name = "Lock"
+	var body := StaticBody3D.new()
+	body.collision_layer = Player.WORLD_LAYER
+	body.collision_mask = 0
+	_gate_shape = CollisionShape3D.new()
+	var bs := BoxShape3D.new()
+	bs.size = Vector3(w, 1.5, 0.3)
+	_gate_shape.shape = bs
+	_gate_shape.position = Vector3(0.0, 0.75, z)
+	body.add_child(_gate_shape)
+	add_child(body)
+	# A sign on the valley side, by the gate.
+	var sign_x := gap + 1.9
+	_box(Vector3(0.1, 1.75, 0.1), Vector3(sign_x - 0.8, 0.875, z - 0.25), dark)
+	_box(Vector3(0.1, 1.75, 0.1), Vector3(sign_x + 0.8, 0.875, z - 0.25), dark)
+	_box(Vector3(1.95, 0.86, 0.06), Vector3(sign_x, 1.35, z - 0.3), Color(0.93, 0.88, 0.76))
+	_gate_sign = Label3D.new()
+	_gate_sign.font_size = 44
+	_gate_sign.pixel_size = 0.0031
+	_gate_sign.modulate = Color(0.25, 0.17, 0.1)
+	_gate_sign.outline_size = 0
+	_gate_sign.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	_gate_sign.position = Vector3(sign_x, 1.35, z - 0.34)
+	_gate_sign.rotation.y = PI
+	add_child(_gate_sign)
+	_set_gate_sign(false)
+
+
+func _set_gate_sign(open: bool) -> void:
+	if open:
+		_gate_sign.text = "THE FROZEN LAKE\nThe gate's open.\nGo melt it!"
+	else:
+		_gate_sign.text = "🔒 THE FROZEN LAKE\nClosed until the\nvillage is free"
+
+
+func _open_gate(animate: bool) -> void:
+	_gate_shape.disabled = true
+	_set_gate_sign(true)
+	var lock := _gate.get_node_or_null("Lock")
+	if lock != null:
+		lock.visible = false
+	var open_angle := deg_to_rad(-105.0)   # swung in toward the lake
+	if animate:
+		var tw := _gate.create_tween()
+		tw.tween_interval(1.2)
+		tw.tween_property(_gate, "rotation:y", open_angle, 2.2).set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_OUT)
+	else:
+		_gate.rotation.y = open_angle
+
+
+func _set_lake_frozen(frozen: bool) -> void:
+	## Until the very end the lake is frozen over: it only thaws when the last
+	## glacier is gone.
+	if _lake_water == null:
+		return
+	if frozen:
+		var m := StandardMaterial3D.new()
+		m.albedo_color = Color(0.82, 0.9, 0.96)
+		m.albedo_texture = _frozen_lake_texture()
+		m.texture_filter = BaseMaterial3D.TEXTURE_FILTER_LINEAR_WITH_MIPMAPS_ANISOTROPIC
+		m.uv1_scale = Vector3(0.05, 0.05, 1.0)
+		m.uv1_triplanar = true
+		m.roughness = 0.35
+		_lake_water.material_override = m
+	else:
+		_lake_water.material_override = _water_mat
+
+
+func _frozen_lake_texture() -> ImageTexture:
+	## Soft grey blotches for the frozen lake (the ice's detail texture has a
+	## different noise in each colour channel, which shows as rainbows).
+	var src := IceField.detail_texture(int(level.seed)).get_image()
+	src.clear_mipmaps()
+	var n := src.get_width()
+	var data := src.get_data()   # RGB8
+	var grey := PackedByteArray()
+	grey.resize(n * n)
+	for i in n * n:
+		grey[i] = int(200.0 + (float(data[i * 3]) * 0.35 + float(data[i * 3 + 1]) * 0.65 - 128.0) * 0.4)
+	var img := Image.create_from_data(n, n, false, Image.FORMAT_L8, grey)
+	img.generate_mipmaps()
+	return ImageTexture.create_from_image(img)
 
 
 # =====================================================================================
@@ -564,10 +775,10 @@ func _mesh(mesh: Mesh, pos: Vector3, c: Color, parent: Node = self) -> MeshInsta
 	return mi
 
 
-func _box(size: Vector3, center: Vector3, c: Color) -> MeshInstance3D:
+func _box(size: Vector3, center: Vector3, c: Color, parent: Node = self) -> MeshInstance3D:
 	var bm := BoxMesh.new()
 	bm.size = size
-	return _mesh(bm, center, c)
+	return _mesh(bm, center, c, parent)
 
 
 func _cone(base: Vector3, radius: float, height: float, c: Color, segments: int = 8) -> MeshInstance3D:
@@ -643,14 +854,16 @@ func _build_ground() -> void:
 	add_child(ground)
 
 	# The meltwater lake past the glacier's tongue, and the stream that feeds it.
-	add_child(Scenery.lake(level))
+	_lake_water = Scenery.lake(level)
+	_water_mat = _lake_water.material_override
+	add_child(_lake_water)
 	var stream := Scenery.stream(level)
 	if stream != null:
 		add_child(stream)
 
 	# A few boulders for scale.
 	var spots := [Vector3(-14, 0, 13), Vector3(-5, 0, 19), Vector3(19.2, 0, 5.0), Vector3(-19, 0, 2),
-			Vector3(18, 0, -6), Vector3(4, 0, 19.5), Vector3(-20, 0, 9), Vector3(19.5, 0, 15)]
+			Vector3(21, 0, -6), Vector3(4, 0, 19.5), Vector3(-20, 0, 9), Vector3(19.5, 0, 15)]
 	for i in spots.size():
 		var p: Vector3 = spots[i]
 		if shed.blocks(p.x, p.z, 1.0):
@@ -777,7 +990,8 @@ func _build_trees() -> void:
 			var hw: float = v.half_width + maxf(0.0, z - v.flare_z) * v.flare
 			x = side * _rng.randf_range(12.0, hw - 1.0)
 		if shed.blocks(x, z, 1.2) or Scenery.on_lake(level, x, z, 2.0) \
-				or Scenery.near_stream(level, x, z, 2.0) or Vector2(x - SPAWN.x, z - SPAWN.z).length() < 4.0:
+				or Scenery.near_stream(level, x, z, 2.0) or Vector2(x - SPAWN.x, z - SPAWN.z).length() < 4.0 \
+				or absf(z - float(v.gate_z)) < 1.6:
 			continue
 		var s := _rng.randf_range(0.8, 1.4) if i < 30 else _rng.randf_range(0.9, 1.7)
 		var spot := [Vector3(x, 0, z), s, _rng.randf() * TAU]
@@ -801,7 +1015,7 @@ func _build_flowers() -> void:
 		var x: float
 		var z: float
 		if inside:
-			x = rng.randf_range(-15.5, 15.5)
+			x = rng.randf_range(-16.5, 16.5)
 			z = rng.randf_range(-24.0, 4.0)
 		else:
 			x = rng.randf_range(-20.0, 20.0)

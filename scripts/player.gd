@@ -12,9 +12,11 @@ const STEP_HEIGHT := 0.5      # walks up ledges this high without jumping
 const WORLD_LAYER := 1        # ground, houses, the shed, rocks, trees
 const ICE_LAYER := 2
 
-var grid: IceField
+var grid: IceField                  # the glacier you're melting
+var grids: Array = []               # every glacier (you bump into whatever's left of any of them)
 var bounds_min := Vector3(-21.0, -1.0, -36.0)   # where you can walk (the world sets these from the level)
 var bounds_max := Vector3(21.0, 80.0, 20.0)
+var walkable: Callable              # optional func(x, z) -> bool on top of the box (the lake's shore)
 
 # Set by the controls every frame.
 var move_input := Vector2.ZERO      # x = strafe right, y = forward
@@ -46,6 +48,7 @@ var _jet: CPUParticles3D
 var _kick := 0.0
 var _hold_t := 0.0
 var _heat_pos := Vector3(0, -100, 0)
+var _heat_grid: IceField
 
 
 func _ready() -> void:
@@ -200,6 +203,7 @@ func _process(delta: float) -> void:
 
 
 func _move(delta: float) -> void:
+	var before := position
 	var speed := Balance.WALK_SPEED * GameState.move_speed_mult()
 	var turn := Basis(Vector3.UP, yaw)
 	var mv := move_input.limit_length(1.0) if input_enabled else Vector2.ZERO
@@ -222,6 +226,15 @@ func _move(delta: float) -> void:
 	var p := position
 	p.x = clampf(p.x, bounds_min.x + RADIUS, bounds_max.x - RADIUS)
 	p.z = clampf(p.z, bounds_min.z + RADIUS, bounds_max.z - RADIUS)
+	if walkable.is_valid() and not walkable.call(p.x, p.z) and walkable.call(before.x, before.z):
+		# At the edge: slide along it if one direction still works.
+		if walkable.call(p.x, before.z):
+			p.z = before.z
+		elif walkable.call(before.x, p.z):
+			p.x = before.x
+		else:
+			p.x = before.x
+			p.z = before.z
 	if p.y < -1.0:
 		p.y = 0.05   # fell through something somehow: back onto the ground
 		velocity = Vector3.ZERO
@@ -288,9 +301,11 @@ func collides(p: Vector3) -> bool:
 	if p.x - RADIUS < bounds_min.x or p.x + RADIUS > bounds_max.x \
 			or p.z - RADIUS < bounds_min.z or p.z + RADIUS > bounds_max.z:
 		return true
-	if grid != null:
+	if walkable.is_valid() and not walkable.call(p.x, p.z):
+		return true
+	for g in _all_grids():
 		for h in [0.3, 0.85, 1.4]:
-			if grid.solid_at(p + Vector3(0, h, 0)):
+			if (g as IceField).solid_at(p + Vector3(0, h, 0)):
 				return true
 	if not is_inside_tree():
 		return false
@@ -320,17 +335,26 @@ func _animate_camera(delta: float) -> void:
 
 
 # --- The tool -------------------------------------------------------------------------------
+func _all_grids() -> Array:
+	if not grids.is_empty():
+		return grids
+	return [grid] if grid != null else []
+
+
 func ray(dist: float) -> Dictionary:
-	## What's straight ahead of the crosshair, if it's ice: {hit, pos, normal, dist}.
+	## What's straight ahead of the crosshair, if it's ice: {hit, pos, normal, dist, grid}.
 	if camera == null or not is_inside_tree() or grid == null:
 		return {"hit": false}
 	var from := camera.global_position
 	var q := PhysicsRayQueryParameters3D.create(from, from + aim_dir() * dist, WORLD_LAYER | ICE_LAYER, [get_rid()])
 	var hit := get_world_3d().direct_space_state.intersect_ray(q)
-	if hit.is_empty() or hit.collider != grid.body:
+	if hit.is_empty():
 		return {"hit": false}
-	var p: Vector3 = hit.position
-	return {"hit": true, "pos": p, "normal": hit.normal, "dist": from.distance_to(p)}
+	for g in _all_grids():
+		if hit.collider == (g as IceField).body:
+			var p: Vector3 = hit.position
+			return {"hit": true, "pos": p, "normal": hit.normal, "dist": from.distance_to(p), "grid": g}
+	return {"hit": false}
 
 
 func _update_tool(delta: float) -> void:
@@ -350,15 +374,19 @@ func _update_tool(delta: float) -> void:
 	var working: bool = active and target.hit
 	if working:
 		var normal: Vector3 = target.normal
-		grid.damage_sphere(target.pos - normal * 0.2, GameState.tool_radius(), GameState.tool_power() * delta)
+		var g: IceField = target.grid
+		if g != _heat_grid and _heat_grid != null:
+			_heat_grid.set_heat(_heat_pos, 0.0)
+		_heat_grid = g
+		g.damage_sphere(target.pos - normal * 0.2, GameState.tool_radius(), GameState.tool_power() * delta)
 		_steam.global_position = target.pos + normal * 0.2
 		_drips.global_position = target.pos + normal * 0.1
 		_heat_pos = target.pos
 	_steam.emitting = working
 	_drips.emitting = working
 	heat = move_toward(heat, 1.0 if working else 0.0, delta * (5.0 if working else 2.0))
-	if grid != null:
-		grid.set_heat(_heat_pos, heat)
+	if _heat_grid != null:
+		_heat_grid.set_heat(_heat_pos, heat)
 
 
 func _build_tool_model() -> void:

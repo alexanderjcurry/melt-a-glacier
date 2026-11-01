@@ -2,7 +2,7 @@ class_name IceField
 extends Node3D
 ## The glacier as one smooth block of ice you can carve.
 ##
-## The ice is a 3D grid of density values every RES metres: 1 = solid ice,
+## The ice is a 3D grid of density values every `res` metres: 1 = solid ice,
 ## 0 = air, and the surface sits where the density crosses 0.5. Heat lowers
 ## the density near where it lands, so the surface creeps back smoothly.
 ## The grid is cut into chunks; each chunk becomes a mesh ("surface nets":
@@ -14,14 +14,11 @@ extends Node3D
 ## mesher never needs bounds checks. Under y = 0 the bottom row repeats, so
 ## the ice simply carries on into the ground with no bottom face.
 
-signal ice_melted(at: Vector3, points: int, hp: float)   # points that just turned to water, and their layers' hp
+signal ice_melted(at: Vector3, volume: float, value: float)   # m³ that just turned to water, and their hp x m³
 signal find_exposed(find: int)
 
-const RES := 0.5                 # metres between grid points
 const CH := 8                    # chunk size in cells, along x and z
-const LAYER_DEPTH := 1.0         # metres of ice per layer, counted from the original surface
 const MELT_K := 0.3              # tool hp -> density. A point of fresh snow takes 0.25 / MELT_K hp
-const POINT_VOLUME := RES * RES * RES
 const REMESH_BUDGET_USEC := 7000 # per frame
 const CHUNK_MIN_INTERVAL := 0.07 # re-mesh the same chunk at most this often (seconds)
 # Ice that has lost its connection to the ground, and small loose chunks
@@ -33,9 +30,15 @@ const FLOAT_MELT_RATE := 0.08    # density lost per second per side open to the 
                                  # first (about 2 s), flat faces last (about 6 s), like real melting
 const FLOAT_CORE_RATE := 0.06    # inside a bit, so big ones soften all the way through
 const FLOAT_TICK := 0.2
-const SMALL_CHUNK_POINTS := 32   # loose chunks on the ground smaller than this (4 m³) melt too
+const SMALL_CHUNK_VOLUME := 4.0  # loose chunks on the ground smaller than this (m³) melt too
 
-var level: Dictionary
+var spec: Dictionary             # this glacier's description (Levels: a level's "glaciers")
+var seed_value := 0
+var res := 0.5                   # metres between grid points (big glaciers use a coarser grid)
+var point_volume := 0.125        # m³ of ice per grid point
+var layer_depth := 1.0           # metres of ice per layer, counted from the original surface
+var layers: Array = []           # Balance.LAYER_SETS[spec.layers]: name, hp, colour, deepest last
+var collide := true              # build collision shapes (off while the glacier is out of reach)
 var origin := Vector3.ZERO       # world position of grid point (0, 0, 0)
 var nx := 0
 var ny := 0
@@ -57,6 +60,7 @@ var material: ShaderMaterial
 var ncx := 0
 var ncz := 0
 
+var _small_points := 32
 var _layer_hp := PackedFloat32Array()
 var _layer_col: Array = []
 var _chunks: Array = []          # {mesh: MeshInstance3D, shape: CollisionShape3D, t: float}
@@ -90,16 +94,23 @@ var _drips: CPUParticles3D             # meltwater dripping off them
 # =====================================================================================
 # Building
 # =====================================================================================
-func generate(p_level: Dictionary, carve: Array = []) -> void:
-	## Fills the grid from the level's glacier shape, cuts the crevasses, and
-	## hollows out `carve` boxes (the buried houses). Then builds every chunk.
-	level = p_level
-	var mn: Vector3 = level.field_min
-	var mx: Vector3 = level.field_max
+func generate(p_spec: Dictionary, p_seed: int, carve: Array = [], mesh_now: bool = true) -> void:
+	## Fills the grid from a glacier's shape (see Levels), cuts its crevasses,
+	## and hollows out `carve` boxes (the buried houses). Then builds every
+	## chunk (or, with mesh_now off, leaves them for the next frames).
+	spec = p_spec
+	seed_value = p_seed
+	res = float(spec.get("res", 0.5))
+	point_volume = res * res * res
+	_small_points = int(round(SMALL_CHUNK_VOLUME / point_volume))
+	layer_depth = float(spec.get("layer_depth", 1.0))
+	layers = Balance.LAYER_SETS[spec.get("layers", "valley")]
+	var mn: Vector3 = spec.field_min
+	var mx: Vector3 = spec.field_max
 	origin = mn
-	nx = int(round((mx.x - mn.x) / RES)) + 1
-	ny = int(round((mx.y - mn.y) / RES)) + 1
-	nz = int(round((mx.z - mn.z) / RES)) + 1
+	nx = int(round((mx.x - mn.x) / res)) + 1
+	ny = int(round((mx.y - mn.y) / res)) + 1
+	nz = int(round((mx.z - mn.z) / res)) + 1
 	px = nx + 2
 	pz = nz + 2
 	plane = px * pz
@@ -111,37 +122,38 @@ func generate(p_level: Dictionary, carve: Array = []) -> void:
 	top0.fill(0.0)
 	col_top.resize(plane)
 	col_top.fill(-1.0)
-	_layer_hp.resize(Balance.LAYERS.size())
-	for l in Balance.LAYERS.size():
-		_layer_hp[l] = Balance.layer_hp(l)
-		_layer_col.append(Balance.LAYERS[l].color)
+	_layer_hp.resize(layers.size())
+	_layer_col.clear()
+	for l in layers.size():
+		_layer_hp[l] = float(layers[l].hp)
+		_layer_col.append(layers[l].color)
 
 	var noise := FastNoiseLite.new()
-	noise.seed = int(level.seed)
+	noise.seed = seed_value
 	noise.frequency = 0.075
 	var detail := FastNoiseLite.new()
-	detail.seed = int(level.seed) + 1
+	detail.seed = seed_value + 1
 	detail.frequency = 0.3
-	var nl := Balance.LAYERS.size() - 1
+	var nl := layers.size() - 1
 	for k in range(1, nz - 1):
 		for i in range(1, nx - 1):
-			var x := origin.x + i * RES
-			var z := origin.z + k * RES
+			var x := origin.x + i * res
+			var z := origin.z + k * res
 			var h := minf(_height(x, z, noise, detail), mx.y - 1.0)
 			var c := (i + 1) + px * (k + 1)
 			top0[c] = h
 			if h <= 0.02:
 				continue
-			var jtop := mini(ny - 2, int(ceil(h / RES)) + 1)
+			var jtop := mini(ny - 2, int(ceil(h / res)) + 1)
 			for j in jtop + 1:
-				var y := origin.y + j * RES
-				var v := clampf(0.5 + (h - y) / (2.0 * RES), 0.0, 1.0)
+				var y := origin.y + j * res
+				var v := clampf(0.5 + (h - y) / (2.0 * res), 0.0, 1.0)
 				if v <= 0.0:
 					continue
 				var s := c + plane * j
 				f[s] = v
-				lay[s] = clampi(int((h - y) / LAYER_DEPTH), 0, nl)
-	for cv in level.get("crevasses", []):
+				lay[s] = clampi(int((h - y) / layer_depth), 0, nl)
+	for cv in spec.get("crevasses", []):
 		_cut_crevasse(cv)
 	for box in carve:
 		_carve_box((box as AABB).grow(0.25))
@@ -150,11 +162,32 @@ func generate(p_level: Dictionary, carve: Array = []) -> void:
 	_update_col_top(0, nx - 1, 0, nz - 1)
 	_build_nodes()
 	for ci in _chunks.size():
-		_remesh(ci)
+		if mesh_now:
+			_remesh(ci)
+		else:
+			_dirty[ci] = true
+
+
+func clear_all() -> void:
+	## This glacier is already gone (loading a save): no ice left, and no
+	## meltwater for it either.
+	f.fill(0.0)
+	remaining = 0
+	col_top.fill(-1.0)
+	find_points.clear()
+	_floating.clear()
+	_scan_phase = 0
+	_scan_dirty = false
+	for ci in _chunks.size():
+		_dirty[ci] = true
 
 
 func _height(x: float, z: float, noise: FastNoiseLite, detail: FastNoiseLite) -> float:
-	var g: Dictionary = level.glacier
+	if spec.get("kind", "tongue") == "dome":
+		return _dome_height(x, z, noise, detail)
+	## A tongue of ice down the valley: full thickness at the back, sloping
+	## down to a toe at snout_z, with rounded sides.
+	var g: Dictionary = spec
 	var full_z: float = g.full_z
 	var snout_z: float = g.snout_z
 	var t := clampf((z - full_z) / (snout_z - full_z), 0.0, 1.0)   # 0 = full, 1 = the toe
@@ -175,6 +208,26 @@ func _height(x: float, z: float, noise: FastNoiseLite, detail: FastNoiseLite) ->
 	return maxf(h, 0.0)
 
 
+func _dome_height(x: float, z: float, noise: FastNoiseLite, detail: FastNoiseLite) -> float:
+	## A round ice cap (the frozen lake): rolling on top, highest in the
+	## middle, with a steep, wobbly edge all the way round.
+	var c: Vector2 = spec.center
+	var rad: Vector2 = spec.radius
+	var a := atan2((z - c.y) / rad.y, (x - c.x) / rad.x)
+	var wob := 1.0 + noise.get_noise_2d(cos(a) * 25.0, sin(a) * 25.0 + 300.0) * float(spec.get("wobble", 0.08))
+	var ex := (x - c.x) / (rad.x * wob)
+	var ez := (z - c.y) / (rad.y * wob)
+	var r2 := ex * ex + ez * ez
+	if r2 >= 1.0:
+		return 0.0
+	var shape := pow(1.0 - r2, float(spec.get("edge", 0.5)))
+	var h := float(spec.height) * shape
+	h += noise.get_noise_2d(x * 0.35, z * 0.35 + 500.0) * float(spec.get("hills", 0.0)) * minf(1.0, shape * 1.5)
+	h += noise.get_noise_2d(x, z) * float(spec.bumps) * minf(1.0, shape * 2.0)
+	h += detail.get_noise_2d(x, z) * 0.18 * minf(1.0, shape * 3.0)
+	return maxf(h, 0.0)
+
+
 func _cut_crevasse(cv: Dictionary) -> void:
 	var x0: float = cv.x0
 	var x1: float = cv.x1
@@ -183,16 +236,16 @@ func _cut_crevasse(cv: Dictionary) -> void:
 	var w: float = cv.width
 	var depth: float = cv.depth
 	for i in range(1, nx - 1):
-		var x := origin.x + i * RES
+		var x := origin.x + i * res
 		if x < x0 or x > x1:
 			continue
 		var u := (x - mid) / half
 		var taper := 1.0 - u * u                      # shallower and narrower at the ends
 		var zc: float = cv.z + float(cv.bow) * taper
 		for k in range(1, nz - 1):
-			var z := origin.z + k * RES
+			var z := origin.z + k * res
 			var dz := absf(z - zc)
-			if dz > w + RES * 2.0:
+			if dz > w + res * 2.0:
 				continue
 			var c := (i + 1) + px * (k + 1)
 			var h := top0[c]
@@ -200,11 +253,11 @@ func _cut_crevasse(cv: Dictionary) -> void:
 				continue
 			var bottom := h - depth * taper
 			for j in ny:
-				var y := origin.y + j * RES
-				if y > h + RES:
+				var y := origin.y + j * res
+				if y > h + res:
 					break
 				var open := w * taper * clampf((y - bottom) / maxf(h - bottom, 0.01), 0.0, 1.0)
-				var v := clampf(0.5 + (dz - open) / (2.0 * RES), 0.0, 1.0)
+				var v := clampf(0.5 + (dz - open) / (2.0 * res), 0.0, 1.0)
 				var s := c + plane * j
 				f[s] = minf(f[s], v)
 
@@ -212,21 +265,21 @@ func _cut_crevasse(cv: Dictionary) -> void:
 func _carve_box(box: AABB) -> void:
 	var lo := box.position
 	var hi := box.end
-	var i0 := clampi(int(floor((lo.x - origin.x) / RES)) - 1, 0, nx - 1)
-	var i1 := clampi(int(ceil((hi.x - origin.x) / RES)) + 1, 0, nx - 1)
-	var j1 := clampi(int(ceil((hi.y - origin.y) / RES)) + 1, 0, ny - 1)
-	var k0 := clampi(int(floor((lo.z - origin.z) / RES)) - 1, 0, nz - 1)
-	var k1 := clampi(int(ceil((hi.z - origin.z) / RES)) + 1, 0, nz - 1)
+	var i0 := clampi(int(floor((lo.x - origin.x) / res)) - 1, 0, nx - 1)
+	var i1 := clampi(int(ceil((hi.x - origin.x) / res)) + 1, 0, nx - 1)
+	var j1 := clampi(int(ceil((hi.y - origin.y) / res)) + 1, 0, ny - 1)
+	var k0 := clampi(int(floor((lo.z - origin.z) / res)) - 1, 0, nz - 1)
+	var k1 := clampi(int(ceil((hi.z - origin.z) / res)) + 1, 0, nz - 1)
 	var c := box.get_center()
 	var half := box.size * 0.5
 	for j in range(0, j1 + 1):
 		for k in range(k0, k1 + 1):
 			for i in range(i0, i1 + 1):
-				var p := origin + Vector3(i, j, k) * RES
+				var p := origin + Vector3(i, j, k) * res
 				var q := (p - c).abs() - half
 				var outside := Vector3(maxf(q.x, 0.0), maxf(q.y, 0.0), maxf(q.z, 0.0)).length()
 				var sd := outside + minf(maxf(q.x, maxf(q.y, q.z)), 0.0)
-				var v := clampf(0.5 + sd / (2.0 * RES), 0.0, 1.0)
+				var v := clampf(0.5 + sd / (2.0 * res), 0.0, 1.0)
 				var s := _s(i, j, k)
 				f[s] = minf(f[s], v)
 
@@ -247,7 +300,7 @@ func _build_nodes() -> void:
 	_drips = null
 	material = ShaderMaterial.new()
 	material.shader = load("res://shaders/ice.gdshader")
-	material.set_shader_parameter("detail_tex", detail_texture(int(level.seed)))
+	material.set_shader_parameter("detail_tex", detail_texture(seed_value))
 	body = StaticBody3D.new()
 	body.name = "IceBody"
 	body.collision_layer = 2
@@ -320,12 +373,12 @@ func point_pos(s: int) -> Vector3:
 	var r := s - j * plane
 	var k := r / px - 1
 	var i := r % px - 1
-	return origin + Vector3(i, j, k) * RES
+	return origin + Vector3(i, j, k) * res
 
 
 func point_at(p: Vector3) -> int:
 	## Storage index of the grid point nearest to p, or -1 outside the grid.
-	var q := (p - origin) / RES
+	var q := (p - origin) / res
 	var i := int(round(q.x))
 	var j := int(round(q.y))
 	var k := int(round(q.z))
@@ -336,7 +389,7 @@ func point_at(p: Vector3) -> int:
 
 func density_at(p: Vector3) -> float:
 	## Trilinear density at a world point (0 outside the grid).
-	var q := (p - origin) / RES
+	var q := (p - origin) / res
 	if q.x < 0.0 or q.z < 0.0 or q.x >= nx - 1 or q.z >= nz - 1 or q.y >= ny - 1:
 		return 0.0
 	q.y = maxf(q.y, 0.0)
@@ -368,7 +421,15 @@ func fraction_left() -> float:
 
 
 func volume_left() -> float:
-	return float(remaining) * POINT_VOLUME
+	return float(remaining) * point_volume
+
+
+func layer_name(l: int) -> String:
+	return str(layers[clampi(l, 0, layers.size() - 1)].name)
+
+
+func layer_hp(l: int) -> float:
+	return _layer_hp[clampi(l, 0, layers.size() - 1)]
 
 
 # =====================================================================================
@@ -383,15 +444,15 @@ func _update_col_top(i0: int, i1: int, k0: int, k1: int) -> void:
 				var v := f[c + plane * j]
 				if v > 0.5:
 					var above := f[c + plane * (j + 1)]
-					top = origin.y + (float(j) + (v - 0.5) / maxf(v - above, 0.001)) * RES
+					top = origin.y + (float(j) + (v - 0.5) / maxf(v - above, 0.001)) * res
 					break
 			col_top[c] = top
 
 
 func surface_y(x: float, z: float) -> float:
 	## Height of the top of the ice (or the ground, 0) at a spot, smoothly.
-	var qx := clampf((x - origin.x) / RES, 0.0, float(nx - 1) - 0.001)
-	var qz := clampf((z - origin.z) / RES, 0.0, float(nz - 1) - 0.001)
+	var qx := clampf((x - origin.x) / res, 0.0, float(nx - 1) - 0.001)
+	var qz := clampf((z - origin.z) / res, 0.0, float(nz - 1) - 0.001)
 	var i := int(qx)
 	var k := int(qz)
 	var tx := qx - i
@@ -407,8 +468,8 @@ func surface_y(x: float, z: float) -> float:
 func has_ice_at(x: float, z: float) -> bool:
 	## Is there any ice left in the column at this spot?
 	var q := Vector3(x, 0.0, z) - origin
-	var i := int(round(q.x / RES))
-	var k := int(round(q.z / RES))
+	var i := int(round(q.x / res))
+	var k := int(round(q.z / res))
 	if i < 0 or k < 0 or i >= nx or k >= nz:
 		return false
 	return col_top[(i + 1) + px * (k + 1)] > 0.0
@@ -416,7 +477,7 @@ func has_ice_at(x: float, z: float) -> bool:
 
 func floor_below(p: Vector3) -> float:
 	## Height of the first ice surface (or the ground) at or below p.
-	var q := (p - origin) / RES
+	var q := (p - origin) / res
 	var i := int(round(q.x))
 	var k := int(round(q.z))
 	if i < 0 or k < 0 or i >= nx or k >= nz:
@@ -426,7 +487,7 @@ func floor_below(p: Vector3) -> float:
 		var v := f[c + plane * j]
 		if v > 0.5:
 			var above := f[c + plane * (j + 1)]
-			return origin.y + (float(j) + (v - 0.5) / maxf(v - above, 0.001)) * RES
+			return origin.y + (float(j) + (v - 0.5) / maxf(v - above, 0.001)) * res
 	return 0.0
 
 
@@ -439,12 +500,12 @@ func random_surface_point(rng: RandomNumberGenerator) -> Vector3:
 		var k := rng.randi_range(1, nz - 2)
 		var top := col_top[(i + 1) + px * (k + 1)]
 		if top > 0.25:
-			return Vector3(origin.x + i * RES, top, origin.z + k * RES)
+			return Vector3(origin.x + i * res, top, origin.z + k * res)
 	for k in nz:   # not much left: scan for it
 		for i in nx:
 			var top := col_top[(i + 1) + px * (k + 1)]
 			if top > 0.0:
-				return Vector3(origin.x + i * RES, top, origin.z + k * RES)
+				return Vector3(origin.x + i * res, top, origin.z + k * res)
 	return Vector3.INF
 
 
@@ -459,8 +520,8 @@ func nearby_surface_point(from: Vector3, rng: RandomNumberGenerator, reach: floa
 
 func original_top(x: float, z: float) -> float:
 	## How high the glacier's surface was here before any melting.
-	var i := clampi(int(round((x - origin.x) / RES)), 0, nx - 1)
-	var k := clampi(int(round((z - origin.z) / RES)), 0, nz - 1)
+	var i := clampi(int(round((x - origin.x) / res)), 0, nx - 1)
+	var k := clampi(int(round((z - origin.z) / res)), 0, nz - 1)
 	return top0[(i + 1) + px * (k + 1)]
 
 
@@ -525,7 +586,7 @@ func damage_sphere(center: Vector3, radius: float, amount: float) -> int:
 	## Returns how many grid points turned to water.
 	if amount <= 0.0 or radius <= 0.0:
 		return 0
-	var inv := 1.0 / RES
+	var inv := 1.0 / res
 	var i0 := maxi(1, int(ceil((center.x - radius - origin.x) * inv)))
 	var i1 := mini(nx - 2, int(floor((center.x + radius - origin.x) * inv)))
 	var j0 := maxi(0, int(ceil((center.y - radius - origin.y) * inv)))
@@ -541,9 +602,9 @@ func damage_sphere(center: Vector3, radius: float, amount: float) -> int:
 	var changed := false
 	var found: Array = []
 	for j in range(j0, j1 + 1):
-		var dy := origin.y + j * RES - center.y
+		var dy := origin.y + j * res - center.y
 		for k in range(k0, k1 + 1):
-			var dz := origin.z + k * RES - center.z
+			var dz := origin.z + k * res - center.z
 			var dyz := dy * dy + dz * dz
 			if dyz > r2:
 				continue
@@ -553,7 +614,7 @@ func damage_sphere(center: Vector3, radius: float, amount: float) -> int:
 				var v := f[s]
 				if v <= 0.0:
 					continue
-				var dx := origin.x + i * RES - center.x
+				var dx := origin.x + i * res - center.x
 				var d2 := dx * dx + dyz
 				if d2 > r2:
 					continue
@@ -571,7 +632,7 @@ func damage_sphere(center: Vector3, radius: float, amount: float) -> int:
 	if melted > 0:
 		remaining -= melted
 		_scan_dirty = true
-		ice_melted.emit(center, melted, hp_sum)
+		ice_melted.emit(center, melted * point_volume, hp_sum * point_volume)
 	for d in found:
 		_expose(d)
 	return melted
@@ -596,7 +657,7 @@ func melt_everything() -> void:
 	for ci in _chunks.size():
 		_dirty[ci] = true
 	if melted > 0:
-		ice_melted.emit(Vector3.INF, melted, hp_sum)
+		ice_melted.emit(Vector3.INF, melted * point_volume, hp_sum * point_volume)
 	for d in found:
 		_expose(d)
 
@@ -620,6 +681,15 @@ func set_heat(at: Vector3, amount: float) -> void:
 	_heat = amount
 	material.set_shader_parameter("heat_pos", at)
 	material.set_shader_parameter("heat_amount", amount)
+
+
+func set_collide(on: bool) -> void:
+	## Collision shapes on or off (re-meshes everything over the next frames).
+	if on == collide:
+		return
+	collide = on
+	for ci in _chunks.size():
+		_dirty[ci] = true
 
 
 func flush() -> void:
@@ -737,7 +807,7 @@ func _read_runs(deadline: int) -> bool:
 		var top := col_top[c]
 		if top < 0.0:
 			continue
-		var jmax := mini(ny - 1, int((top - origin.y) / RES) + 1)
+		var jmax := mini(ny - 1, int((top - origin.y) / res) + 1)
 		var first := _runs.size() / 3
 		var n := 0
 		var j := 0
@@ -767,7 +837,7 @@ func _group_runs(deadline: int) -> bool:
 		if _q_head >= _queue.size():
 			if not _queue.is_empty():
 				# This group is done: does it melt?
-				_group_melts.append(1 if (not _cur_grounded or _cur_size < SMALL_CHUNK_POINTS) else 0)
+				_group_melts.append(1 if (not _cur_grounded or _cur_size < _small_points) else 0)
 				_queue.clear()
 				_q_head = 0
 			while _next_seed < nruns and _group[_next_seed] >= 0:
@@ -914,7 +984,7 @@ func _melt_floating(dt: float) -> void:
 		_drips.emitting = false
 	if melted > 0:
 		remaining -= melted
-		ice_melted.emit(at / float(melted), melted, hp_sum)
+		ice_melted.emit(at / float(melted), melted * point_volume, hp_sum * point_volume)
 	for d in found:
 		_expose(d)
 
@@ -948,7 +1018,7 @@ func _remesh(ci: int) -> void:
 	var cs: CollisionShape3D = ch.shape
 	var mesh := _build_chunk_mesh(ci)
 	mi.mesh = mesh
-	if mesh == null:
+	if mesh == null or not collide:
 		cs.disabled = true
 		cs.shape = null
 		return
@@ -981,6 +1051,7 @@ func _build_chunk_mesh(ci: int) -> ArrayMesh:
 	var oy := origin.y
 	var oz := origin.z
 	var nl := _layer_col.size() - 1
+	var inv_res := 1.0 / res
 
 	for lz in cd:
 		var k := z0 - 1 + lz
@@ -990,13 +1061,18 @@ func _build_chunk_mesh(ci: int) -> ArrayMesh:
 			var s10 := s00 + 1
 			var s01 := s00 + px
 			var s11 := s01 + 1
+			# Nothing to do above the highest ice in these four columns.
+			var hi := maxf(maxf(col_top[s00], col_top[s10]), maxf(col_top[s01], col_top[s11]))
+			if hi < 0.0:
+				continue
+			var rows := mini(crows - 1, int((hi - oy) * inv_res) + 3)
 			var top_here := top0[s00]
 			# Bottom corners of row -1 repeat row 0.
 			var a0 := ff[s00]
 			var a1 := ff[s10]
 			var a2 := ff[s01]
 			var a3 := ff[s11]
-			for r in crows - 1:
+			for r in rows:
 				var off := r * pl            # row r is cells at y = r - 1; top corners are point row r
 				var b0 := ff[s00 + off]
 				var b1 := ff[s10 + off]
@@ -1059,9 +1135,9 @@ func _build_chunk_mesh(ci: int) -> ArrayMesh:
 						sz += 1.0
 						n += 1
 					var inv_n := 1.0 / float(n)
-					var wx := ox + (float(i) + sx * inv_n) * RES
-					var wy := oy + (float(r - 1) + sy * inv_n) * RES
-					var wz := oz + (float(k) + sz * inv_n) * RES
+					var wx := ox + (float(i) + sx * inv_n) * res
+					var wy := oy + (float(r - 1) + sy * inv_n) * res
+					var wz := oz + (float(k) + sz * inv_n) * res
 					var g := Vector3((a1 + a3 + b1 + b3) - (a0 + a2 + b0 + b2),
 						(b0 + b1 + b2 + b3) - (a0 + a1 + a2 + a3),
 						(a2 + a3 + b2 + b3) - (a0 + a1 + b0 + b1))
@@ -1079,13 +1155,18 @@ func _build_chunk_mesh(ci: int) -> ArrayMesh:
 		return null
 	var idx := PackedInt32Array()
 	# Quads: one per crossed grid edge whose start point this chunk owns.
-	for j in range(0, ny - 1):
-		var r := j + 1                       # cell row of cells at y = j
-		for k in range(z0, z1):
-			var lz := k - z0 + 1             # local cell z of cells at z = k
-			for i in range(x0, x1):
-				var lx := i - x0 + 1
-				var s := (i + 1) + px * (k + 1) + pl * j
+	for k in range(z0, z1):
+		var lz := k - z0 + 1                 # local cell z of cells at z = k
+		for i in range(x0, x1):
+			var lx := i - x0 + 1
+			var c := (i + 1) + px * (k + 1)
+			var hi := maxf(col_top[c], maxf(col_top[c + 1], col_top[c + px]))
+			if hi < 0.0:
+				continue
+			var jn := mini(ny - 1, int((hi - oy) * inv_res) + 2)
+			for j in range(0, jn):
+				var r := j + 1                   # cell row of cells at y = j
+				var s := c + pl * j
 				var inside := ff[s] > 0.5
 				# x edge: (i,j,k) -> (i+1,j,k); cells (i, j-1..j, k-1..k)
 				if inside != (ff[s + 1] > 0.5) and i < nx - 1:
@@ -1138,7 +1219,7 @@ func _vertex_color(x: float, y: float, z: float, n: Vector3, top: float, nl: int
 	## darkened in nooks (a cheap ambient occlusion from the density around it).
 	## A: 1 on the untouched snowy top, 0 on freshly carved ice.
 	var depth := top - y
-	var lf := clampf(depth / LAYER_DEPTH - 0.5, 0.0, float(nl))
+	var lf := clampf(depth / layer_depth - 0.5, 0.0, float(nl))
 	var l0 := int(lf)
 	var l1 := mini(l0 + 1, nl)
 	var c: Color = (_layer_col[l0] as Color).lerp(_layer_col[l1], smoothstep(0.0, 1.0, lf - l0))

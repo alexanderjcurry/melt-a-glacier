@@ -5,7 +5,10 @@ a valley that's buried under a glacier, aim a hair dryer at the ice and slowly
 dig into it. Meltwater is money: spend it at the shed on hotter tools,
 upgrades and helpers (penguins with tiny torches, a sauna crew, an adopted
 volcano called Kevin). Frozen junk melts out as you dig, and at the very bottom
-there's a whole village. Melt the last of it and summer comes back.
+there's a whole village. Free the village and the gate in the fence opens: the
+whole lake beyond it froze solid, and it's a far bigger, harder glacier. Your
+helpers retire to the village, you hire a new crew, and when the last of the
+lake ice is gone summer comes back. A run takes roughly 35 to 70 minutes.
 
 ## Play it on your phone (iPhone or Android)
 
@@ -64,8 +67,9 @@ iOS comes later through Codemagic (Godot workflow). Nothing in the code is Andro
 
 | Feature | Where |
 |---|---|
-| The glacier: smooth, diggable ice (about 4,900 m³) stored as a density field on a 0.5 m grid and re-meshed in 8x8 chunks as you melt it (surface nets). 8 layers by depth, from Fresh Snow to The Last Chunk: deeper ice is harder and worth more. Crevasses, snow cover, blue carved ice and a wet glow where the heat lands are drawn by `shaders/ice.gdshader` | `scripts/ice_field.gd`, `Balance.LAYERS` |
-| The level: the glacier's shape, its crevasses and the valley around it are one dictionary, so more levels are more dictionaries | `scripts/levels.gd` |
+| Two glaciers, melted in order. The village glacier (about 7,300 m³, a 0.5 m grid) and then the frozen lake (about 62,000 m³, a 1 m grid). Each is smooth, diggable ice stored as a density field and re-meshed in 8x8 chunks as you melt it (surface nets). 10 layers by depth each, from Fresh Snow to The Last Chunk in the village and from Lake Snow to The Lake's Heart (turquoise, jade, black, violet) in the lake: deeper ice is harder and worth more. Crevasses, snow cover, carved ice and a wet glow where the heat lands are drawn by `shaders/ice.gdshader` | `scripts/ice_field.gd`, `Balance.LAYER_SETS` |
+| The level: each glacier's shape, its crevasses and the valley around them are one dictionary, so more levels (or more glaciers in one level) are more dictionaries | `scripts/levels.gd` |
+| A fence across the valley keeps you off the lake. Its gate is locked until the village is free, then swings open. Your helpers retire and party in the village, and the lake crew you hire is stronger and pricier. Tools and upgrades carry over | `World._build_fence()`, `GameState.check_win()` |
 | First-person walking (CharacterBody3D on the ice's collision mesh), step-up, a jetpack (hold JUMP, fuel refills on landing) and a respawn button | `scripts/player.gd` |
 | The valley: generated mountains with rock and snow, a cloudy sky, the lake and a meltwater stream, pine forest, boulders | `scripts/scenery.gd`, `shaders/` |
 | The heat tool: aim with the crosshair, hold to melt a ball of ice, flame and steam effects | `Player._update_tool()` |
@@ -73,14 +77,14 @@ iOS comes later through Codemagic (Godot workflow). Nothing in the code is Andro
 | 6 tools bought in order at the shed: Hair Dryer, Heat Lamp, Blowtorch, Flamethrower, Lava Hose, Orbital Mirror (the same models you hold) | `Balance.TOOLS`, `scripts/props.gd` |
 | 5 upgrades: Heat Output, Wider Nozzle, Longer Reach, Steam Sell, Crampon Boots | `Balance.UPGRADES` |
 | Helpers (3D models built in code): penguins with tiny torches and the sauna crew walk on the ice melting it, Kevin the volcano lobs lava bombs and watches you | `scripts/helpers.gd`, `scripts/creatures.gd`, `Balance.HELPERS` |
-| 11 buried finds frozen at fixed depths (mitten, snowmobile, mammoth, 1970s caveman, dinosaur egg...). They melt out, sell for a burst of water, and stay in the world | `World._place_finds()`, `Balance.DISCOVERIES` |
+| 18 buried finds frozen at fixed depths: 11 in the village glacier (mitten, snowmobile, mammoth, 1970s caveman, dinosaur egg...) and 7 in the lake (ice skater, pirate treasure, a whale, a lake monster, a UFO, the sun's lost ray). They melt out, sell for a burst of water, and stay in the world | `World._place_finds()`, `Balance.DISCOVERIES` |
 | A village frozen inside the glacier. The church spire pokes out of the top as a hint | `World._build_village()` |
 | The valley greens up and flowers bloom where the ice is gone; villagers come out at the end | `World._update_slow()` |
 | Loose ice melts by itself: bits left floating, and small chunks on the ground (under about 4 m³), shrink away over a few seconds, corners first, and still pay out | `IceField._melt_floating()` |
 | No "while you were away" earnings: it's a game you play in a sitting, so nothing melts while it's closed | |
 | Rewarded ad: 2x heat for 5 min (stacks to 15). IAP: Remove Ads + permanent 2x, Golden Hair Dryer, Restore | HUD button, the catalogue in the shed |
 | Light interstitials: only when leaving the shed, after 15% of the ice is gone, at most every 4 min, never with Remove Ads | `Monetization.maybe_show_interstitial()` |
-| Ending with a stats screen, then walk around the village or melt a new glacier | `Hud.show_ending()` |
+| A popup when the village is free, an ending with a stats screen when the lake is, then walk around or melt a new valley | `Hud.show_stage_done()`, `Hud.show_ending()` |
 | Short onboarding hints the first time | `World._update_coach()` |
 | Autosave every 10s and when the app is backgrounded (`user://save3d.json`), glacier included | `GameState` |
 
@@ -116,16 +120,30 @@ fonts/                   subset Noto Color Emoji (the placeholder art) + license
 tests/smoke_test.gd      headless test: godot --headless -s res://tests/smoke_test.gd
 tests/screenshots.gd     renders screenshots of key moments (see the top of the file)
 tests/field_bench.gd     timing benchmark for the ice (build, re-mesh, melt rate)
+tests/pacing.gd          a bot plays a whole run and prints how long each part took
 tools/subset_emoji.sh    rebuild the emoji font if you add new emoji
 ```
 
 ## Tuning the pacing
 
-Every number lives in `scripts/balance.gd`. The glacier holds about 4,900 m³ of
-ice. Each layer has an hp per cubic metre, and melting a cubic metre pays out that
-hp in meltwater (times the Steam Sell upgrade). To make the game longer, raise the
-deeper `LAYERS` hp values (and the tool costs with them). The first playtests
-will tell us how long a run really takes.
+Every number lives in `scripts/balance.gd`. Each ice layer has an hp per cubic
+metre, and melting a cubic metre pays out that hp in meltwater (times the Steam
+Sell upgrade). Helpers' power is in the same units: a penguin with power 0.5
+melts about 0.5 hp of ice per second.
+
+`tests/pacing.gd` plays a whole run in about five minutes of real time and
+prints when it bought each tool and finished each glacier:
+
+```
+godot --headless --fixed-fps 20 -s res://tests/pacing.gd             # a keen player
+godot --headless --fixed-fps 20 -s res://tests/pacing.gd -- casual   # a slower one
+```
+
+Aim for the village in about 15 to 20 minutes and the lake in about 20 to 30
+for a keen player. A casual player takes longer, and real first runs land in
+between. Each tool costs roughly what the glacier pays out while you use the
+tool before it, so to slow a part down, raise the next tool's cost or the hp of
+the layers it has to get through.
 
 ## Adding real ads and purchases later
 
