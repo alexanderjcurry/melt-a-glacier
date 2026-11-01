@@ -24,6 +24,13 @@ const MELT_K := 0.3              # tool hp -> density. A point of fresh snow tak
 const POINT_VOLUME := RES * RES * RES
 const REMESH_BUDGET_USEC := 7000 # per frame
 const CHUNK_MIN_INTERVAL := 0.07 # re-mesh the same chunk at most this often (seconds)
+# Ice that has lost its connection to the ground (or tiny crumbs on it) melts
+# away slowly by itself, so carving doesn't leave floating patches around.
+const FLOAT_SCAN_DELAY := 1.2    # seconds after something melts before looking for floating bits
+const FLOAT_BUDGET_USEC := 1200  # per frame, for that search
+const FLOAT_MELT_RATE := 0.12    # density lost per second: a patch drips away in about 4 s
+const FLOAT_TICK := 0.2
+const CRUMB_POINTS := 4          # bits of ice resting on the ground smaller than this melt too
 
 var level: Dictionary
 var origin := Vector3.ZERO       # world position of grid point (0, 0, 0)
@@ -54,6 +61,27 @@ var _dirty := {}                 # chunk index -> true
 var _clock := 0.0
 var _heat := 0.0
 var _glow_t := 0.0
+
+# Looking for floating ice. Each column's solid stretches ("runs") are read a
+# few columns per frame, then runs that touch (same height range in a
+# neighbouring column) are grouped. Groups that don't reach the ground melt.
+var _scan_dirty := true          # something melted since the last search started
+var _scan_wait := 0.0
+var _scan_phase := 0             # 0 = idle, 1 = reading columns, 2 = grouping runs
+var _scan_c := 0                 # next column to read (k * nx + i)
+var _runs := PackedInt32Array()  # 3 ints per run: padded column index, lowest j, highest j
+var _col_first := PackedInt32Array()   # per padded column: its first run
+var _col_count := PackedInt32Array()   # and how many runs it has
+var _group := PackedInt32Array() # per run: its group, -1 = not reached yet
+var _group_melts := PackedByteArray()  # per group: 1 = floating (or a crumb), melt it
+var _queue := PackedInt32Array()
+var _q_head := 0
+var _next_seed := 0
+var _cur_size := 0
+var _cur_grounded := false
+var _floating := PackedInt32Array()    # points melting away by themselves
+var _float_t := 0.0
+var _drips: CPUParticles3D             # meltwater dripping off them
 
 
 # =====================================================================================
@@ -213,6 +241,7 @@ func _count() -> void:
 func _build_nodes() -> void:
 	for c in get_children():
 		c.queue_free()
+	_drips = null
 	material = ShaderMaterial.new()
 	material.shader = load("res://shaders/ice.gdshader")
 	material.set_shader_parameter("detail_tex", detail_texture(int(level.seed)))
@@ -475,6 +504,8 @@ func load_save_string(data: String) -> bool:
 			loaded[s] = f[s]   # ice never grows back (and keeps the edges clean)
 	f = loaded
 	_count()
+	_scan_dirty = true
+	_scan_phase = 0
 	_update_col_top(0, nx - 1, 0, nz - 1)
 	for ci in _chunks.size():
 		_dirty[ci] = true
@@ -536,6 +567,7 @@ func damage_sphere(center: Vector3, radius: float, amount: float) -> int:
 		_touch(i0, i1, k0, k1)
 	if melted > 0:
 		remaining -= melted
+		_scan_dirty = true
 		ice_melted.emit(center, melted, hp_sum)
 	for d in found:
 		_expose(d)
@@ -574,6 +606,8 @@ func melt_everything() -> void:
 	f.fill(0.0)
 	remaining = 0
 	col_top.fill(-1.0)
+	_floating.clear()
+	_scan_phase = 0
 	for ci in _chunks.size():
 		_dirty[ci] = true
 	if melted > 0:
@@ -612,6 +646,7 @@ func flush() -> void:
 
 func _process(delta: float) -> void:
 	_clock += delta
+	_update_floating(delta)
 	if not _dirty.is_empty():
 		var start := Time.get_ticks_usec()
 		for ci in _dirty.keys():
@@ -631,6 +666,260 @@ func _process(delta: float) -> void:
 		elif _glow_t > 0.0:
 			_glow_t = 0.0
 			material.set_shader_parameter("glow", 0.0)
+
+
+# =====================================================================================
+# Floating ice: bits with nothing holding them up slowly melt away
+# =====================================================================================
+func _update_floating(delta: float) -> void:
+	_float_t += delta
+	if _float_t >= FLOAT_TICK:
+		_melt_floating(_float_t)
+		_float_t = 0.0
+	if _scan_phase == 0:
+		if not _scan_dirty or remaining <= 0:
+			return
+		_scan_wait += delta
+		if _scan_wait < FLOAT_SCAN_DELAY:
+			return
+		_start_scan()
+	var deadline := Time.get_ticks_usec() + FLOAT_BUDGET_USEC
+	if _scan_phase == 1:
+		if not _read_runs(deadline):
+			return
+		_scan_phase = 2
+		var nruns := _runs.size() / 3
+		_group.resize(nruns)
+		_group.fill(-1)
+		_group_melts.clear()
+		_queue.clear()
+		_q_head = 0
+		_next_seed = 0
+		if Time.get_ticks_usec() > deadline:
+			return
+	if _scan_phase == 2:
+		if not _group_runs(deadline):
+			return
+		_collect_floating()
+		_scan_phase = 0
+
+
+func find_floating_now() -> void:
+	## Runs the whole search at once (tests, and after loading a save).
+	_start_scan()
+	_read_runs(Time.get_ticks_usec() + 60000000)
+	var nruns := _runs.size() / 3
+	_group.resize(nruns)
+	_group.fill(-1)
+	_group_melts.clear()
+	_queue.clear()
+	_q_head = 0
+	_next_seed = 0
+	_group_runs(Time.get_ticks_usec() + 60000000)
+	_collect_floating()
+	_scan_phase = 0
+
+
+func floating_count() -> int:
+	## Points that are still solid and melting away by themselves.
+	var n := 0
+	for s in _floating:
+		if f[s] > 0.5:
+			n += 1
+	return n
+
+
+func _start_scan() -> void:
+	_scan_dirty = false
+	_scan_wait = 0.0
+	_scan_phase = 1
+	_scan_c = 0
+	_runs.clear()
+	if _col_count.size() != plane:
+		_col_count.resize(plane)
+		_col_first.resize(plane)
+	_col_count.fill(0)
+
+
+func _read_runs(deadline: int) -> bool:
+	## Reads each column's solid stretches. Returns true when every column is done.
+	var cols := nx * nz
+	while _scan_c < cols:
+		var k := _scan_c / nx
+		var i := _scan_c - k * nx
+		_scan_c += 1
+		var c := (i + 1) + px * (k + 1)
+		var top := col_top[c]
+		if top < 0.0:
+			continue
+		var jmax := mini(ny - 1, int((top - origin.y) / RES) + 1)
+		var first := _runs.size() / 3
+		var n := 0
+		var j := 0
+		while j <= jmax:
+			if f[c + plane * j] > 0.5:
+				var j0 := j
+				while j < jmax and f[c + plane * (j + 1)] > 0.5:
+					j += 1
+				_runs.append(c)
+				_runs.append(j0)
+				_runs.append(j)
+				n += 1
+			j += 1
+		if n > 0:
+			_col_first[c] = first
+			_col_count[c] = n
+		if (_scan_c & 15) == 0 and Time.get_ticks_usec() > deadline:
+			return false
+	return true
+
+
+func _group_runs(deadline: int) -> bool:
+	## Groups touching runs (flood fill). Returns true when every run has a group.
+	var nruns := _runs.size() / 3
+	var steps := 0
+	while true:
+		if _q_head >= _queue.size():
+			if not _queue.is_empty():
+				# This group is done: does it melt?
+				_group_melts.append(1 if (not _cur_grounded or _cur_size < CRUMB_POINTS) else 0)
+				_queue.clear()
+				_q_head = 0
+			while _next_seed < nruns and _group[_next_seed] >= 0:
+				_next_seed += 1
+			if _next_seed >= nruns:
+				return true
+			_group[_next_seed] = _group_melts.size()
+			_queue.append(_next_seed)
+			_cur_size = 0
+			_cur_grounded = false
+		var r := _queue[_q_head]
+		_q_head += 1
+		var g := _group[r]
+		var c := _runs[r * 3]
+		var j0 := _runs[r * 3 + 1]
+		var j1 := _runs[r * 3 + 2]
+		_cur_size += j1 - j0 + 1
+		if j0 == 0:
+			_cur_grounded = true
+		for side in 4:
+			var nc := c + (-1 if side == 0 else (1 if side == 1 else (-px if side == 2 else px)))
+			var cnt := _col_count[nc]
+			if cnt == 0:
+				continue
+			var q := _col_first[nc]
+			for _n in cnt:
+				if _group[q] < 0 and _runs[q * 3 + 1] <= j1 and _runs[q * 3 + 2] >= j0:
+					_group[q] = g
+					_queue.append(q)
+				q += 1
+		steps += 1
+		if (steps & 15) == 0 and Time.get_ticks_usec() > deadline:
+			return false
+	return true
+
+
+func _collect_floating() -> void:
+	## Every solid point in a group that melts joins the list (points still
+	## fading from the last search stay on it).
+	var keep := PackedInt32Array()
+	for s in _floating:
+		if f[s] > 0.0 and f[s] <= 0.5:
+			keep.append(s)
+	var nruns := _runs.size() / 3
+	for r in nruns:
+		var g := _group[r]
+		if g < 0 or g >= _group_melts.size() or _group_melts[g] == 0:
+			continue
+		var c := _runs[r * 3]
+		for j in range(_runs[r * 3 + 1], _runs[r * 3 + 2] + 1):
+			var s := c + plane * j
+			if f[s] > 0.5:
+				keep.append(s)
+	_floating = keep
+
+
+func _drip_from(lo: Vector3, hi: Vector3) -> void:
+	## Meltwater dripping off the underside of whatever is melting away.
+	if _drips == null:
+		_drips = CPUParticles3D.new()
+		_drips.amount = 28
+		_drips.lifetime = 0.9
+		_drips.local_coords = false
+		_drips.direction = Vector3(0, -1, 0)
+		_drips.spread = 8.0
+		_drips.gravity = Vector3(0, -9.0, 0)
+		_drips.initial_velocity_min = 0.0
+		_drips.initial_velocity_max = 0.4
+		_drips.emission_shape = CPUParticles3D.EMISSION_SHAPE_BOX
+		var quad := QuadMesh.new()
+		quad.size = Vector2(0.07, 0.11)
+		var mat := StandardMaterial3D.new()
+		mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+		mat.billboard_mode = BaseMaterial3D.BILLBOARD_PARTICLES
+		mat.billboard_keep_scale = true   # see Player._make_particles
+		mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+		mat.vertex_color_use_as_albedo = true
+		mat.albedo_texture = UiTheme.soft_dot()
+		quad.material = mat
+		_drips.mesh = quad
+		var ramp := Gradient.new()
+		ramp.set_color(0, Color(0.8, 0.93, 1.0, 0.95))
+		ramp.set_color(1, Color(0.65, 0.85, 1.0, 0.0))
+		_drips.color_ramp = ramp
+		add_child(_drips)
+	var c := (lo + hi) * 0.5
+	_drips.position = Vector3(c.x, lo.y, c.z)
+	_drips.emission_box_extents = Vector3(maxf(0.2, (hi.x - lo.x) * 0.5), 0.05, maxf(0.2, (hi.z - lo.z) * 0.5))
+	_drips.emitting = true
+
+
+func _melt_floating(dt: float) -> void:
+	if _floating.is_empty():
+		return
+	var per := FLOAT_MELT_RATE * dt
+	var keep := PackedInt32Array()
+	var melted := 0
+	var hp_sum := 0.0
+	var at := Vector3.ZERO
+	var found: Array = []
+	var i0 := nx
+	var i1 := -1
+	var k0 := nz
+	var k1 := -1
+	var j0 := ny
+	for s in _floating:
+		var v := f[s]
+		var nv := maxf(v - per, 0.0)
+		f[s] = nv
+		var j := s / plane
+		var r := s - j * plane
+		var i := r % px - 1
+		var k := r / px - 1
+		i0 = mini(i0, i)
+		i1 = maxi(i1, i)
+		k0 = mini(k0, k)
+		k1 = maxi(k1, k)
+		j0 = mini(j0, j)
+		if v > 0.5 and nv <= 0.5:
+			melted += 1
+			hp_sum += _layer_hp[lay[s]]
+			at += point_pos(s)
+			if find_points.has(s) and not found.has(find_points[s]):
+				found.append(find_points[s])
+		if nv > 0.0:
+			keep.append(s)
+	_floating = keep
+	if i1 >= 0:
+		_touch(i0, i1, k0, k1)
+		_drip_from(origin + Vector3(i0, j0, k0) * RES, origin + Vector3(i1, j0, k1) * RES)
+	if _floating.is_empty() and _drips != null:
+		_drips.emitting = false
+	if melted > 0:
+		remaining -= melted
+		ice_melted.emit(at / float(melted), melted, hp_sum)
+	for d in found:
+		_expose(d)
 
 
 # =====================================================================================

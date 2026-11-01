@@ -1,19 +1,29 @@
 class_name HelperSwarm
 extends Node3D
-## Helpers you buy at the shed. Penguins and the sauna crew waddle around on
-## top of the ice melting the spot in front of them. Kevin the adopted
+## Helpers you buy at the shed. Penguins and the sauna crew wander around on
+## top of the ice, melting a thin layer as they walk (so the glacier wears
+## down evenly instead of getting dug full of holes). Kevin the adopted
 ## volcano lobs lava bombs (and keeps an eye on you).
 
 const WALKER_TYPES := [0, 1]           # indices into Balance.HELPERS that walk
 const VOLCANO_TYPE := 2
 const VOLCANO_POS := Vector3(-27.0, 13.0, -38.0)
-const WALK_SPEED := [1.4, 1.1]         # per walker type
-const MELT_RADIUS := [0.7, 1.0]
-const MELT_TIME := 4.5                 # seconds at one spot before moving on
+const WALK_SPEED := [1.2, 0.95]        # m/s, per walker type
+# Their heat lands in a few small, shallow spots scattered around them (the
+# sauna crew's hot stones warm a wide circle), so the ice wears down a little
+# everywhere they go instead of in one deep hole.
+const SPREAD := [0.9, 2.2]             # radius of the circle the heat lands in
+const SPOT_RADIUS := [0.6, 0.75]
+const SPOTS := [2, 5]                  # spots per pulse
+const OLD_RADIUS := [0.7, 1.0]         # the heat zone their power was tuned for (keeps the hp/s the same)
+const MELT_PULSE := 0.25               # heat is saved up and put down this often (seconds)
+const HEAT_SHARE := 0.2                # they melt nonstop now, so each step gets less (about the same pace as before)
+const DROP := 0.6                      # won't step down more than this per 0.6 m (into a hole)
+const CLIMB := 1.1                     # or climb more than this
 
 var grid: IceField
 var player: Node3D                     # Kevin watches you
-var _walkers: Array = []               # {type, node, body, pos, target, t, timer, melting, fx}
+var _walkers: Array = []               # {type, node, body, pos, target, t, heat, pulse, fx}
 var _bombs: Array = []                 # {node, from, to, t, dur, damage}
 var _bomb_timer := 0.0
 var _rng := RandomNumberGenerator.new()
@@ -86,7 +96,7 @@ func _spawn_walker(t: int) -> void:
 	node.position = p
 	node.rotation.y = _rng.randf() * TAU
 	_walkers.append({"type": t, "node": node, "body": body, "pos": p, "target": Vector3.INF,
-		"t": _rng.randf() * TAU, "timer": 0.0, "melting": false, "fx": fx})
+		"t": _rng.randf() * TAU, "heat": 0.0, "pulse": _rng.randf() * MELT_PULSE, "scramble": false, "fx": fx})
 
 
 func _make_fx(c0: Color, c1: Color, size: float, amount: int, life: float) -> CPUParticles3D:
@@ -133,37 +143,94 @@ func _update_walker(w: Dictionary, delta: float) -> void:
 	var count := int(GameState.helper_counts[t])
 	var shown := maxi(mini(count, Balance.MAX_VISIBLE_WALKERS), 1)
 	var power := GameState.helper_power(t) / float(shown)   # each visible walker carries a share
+	# Keep wandering: a new spot every few metres, never over a cliff or into a deep hole.
 	var tgt: Vector3 = w.target
-	if tgt == Vector3.INF or not grid.has_ice_at(tgt.x, tgt.z):
-		tgt = grid.nearby_surface_point(pos, _rng, 4.0)
+	var flat := Vector3.ZERO
+	if tgt != Vector3.INF:
+		flat = Vector3(tgt.x - pos.x, 0.0, tgt.z - pos.z)
+	if tgt == Vector3.INF or flat.length() < 0.4 or not grid.has_ice_at(tgt.x, tgt.z):
+		var pick := _pick_target(pos)
+		tgt = pick[0]
 		w.target = tgt
-		w.timer = 0.0
+		w.scramble = not pick[1]   # no easy way anywhere: climb out however it takes
 		if tgt == Vector3.INF:
 			fx.emitting = false
+			_pose(w, 0.0, 0.0, false)
 			return
-	var flat := Vector3(tgt.x - pos.x, 0.0, tgt.z - pos.z)
-	var walking := flat.length() > 0.3
-	if walking:
-		pos += flat.normalized() * minf(float(WALK_SPEED[t]) * delta, flat.length())
-		node.rotation.y = lerp_angle(node.rotation.y, atan2(-flat.x, -flat.z), minf(1.0, delta * 8.0))
-		w.t += delta * (11.0 if t == 0 else 8.0)
-		w.timer = 0.0
-	else:
-		# Melt the spot just in front.
-		var fwd := -node.global_transform.basis.z
-		var spot := Vector3(pos.x, 0.0, pos.z) + fwd * 0.35
-		spot.y = grid.surface_y(spot.x, spot.z) - 0.12
-		grid.damage_sphere(spot, float(MELT_RADIUS[t]), power * delta)
-		w.timer += delta
-		w.t += delta * 3.0
-		if w.timer > MELT_TIME:
-			w.target = grid.nearby_surface_point(pos, _rng, 3.0)
-			w.timer = 0.0
-	fx.emitting = not walking
+		flat = Vector3(tgt.x - pos.x, 0.0, tgt.z - pos.z)
+	var dir := flat.normalized()
+	var ahead := pos + dir * 0.6
+	var step := grid.surface_y(ahead.x, ahead.z) - grid.surface_y(pos.x, pos.z)
+	if not w.scramble and (step < -DROP or step > CLIMB):
+		w.target = Vector3.INF   # too steep that way (someone dug a hole): go somewhere else
+		return
+	pos += dir * minf(float(WALK_SPEED[t]) * delta, flat.length())
+	node.rotation.y = lerp_angle(node.rotation.y, atan2(-dir.x, -dir.z), minf(1.0, delta * 6.0))
+	w.t += delta * (11.0 if t == 0 else 8.0)
+	# Melt a thin layer just ahead of their feet as they go.
+	var on_ice := grid.has_ice_at(pos.x, pos.z)
+	if on_ice:
+		w.heat += power * delta
+		w.pulse += delta
+		if w.pulse >= MELT_PULSE:
+			var r: float = SPOT_RADIUS[t]
+			var n: int = SPOTS[t]
+			var spread: float = SPREAD[t]
+			# Heat per spot: the zone size changed, so scale to keep the same total.
+			var amount: float = w.heat * HEAT_SHARE * pow(float(OLD_RADIUS[t]) / r, 3.0) / float(n)
+			var ahead_c := Vector3(pos.x, 0.0, pos.z) - node.global_transform.basis.z * spread * 0.4
+			for _k in n:
+				var a := _rng.randf() * TAU
+				var spot := ahead_c + Vector3(cos(a), 0.0, sin(a)) * spread * sqrt(_rng.randf())
+				if grid.has_ice_at(spot.x, spot.z):
+					spot.y = grid.surface_y(spot.x, spot.z) + 0.12
+					grid.damage_sphere(spot, r, amount)
+			w.heat = 0.0
+			w.pulse = 0.0
+	fx.emitting = on_ice
 	pos.y = lerpf(pos.y, grid.surface_y(pos.x, pos.z), minf(1.0, delta * 10.0))
 	w.pos = pos
 	node.position = pos
-	_pose(w, 1.0 if walking else 0.0, 0.0 if walking else 1.0, false)
+	_pose(w, 1.0, 0.35 if on_ice else 0.0, false)
+
+
+func _pick_target(from: Vector3) -> Array:
+	## [spot, easy]: somewhere on the ice a few metres away, preferring snow
+	## that hasn't been melted down yet (so the glacier wears down evenly
+	## instead of getting trenches), reachable without dropping into a hole or
+	## climbing a wall (easy = true). Otherwise any spot on the ice nearby.
+	var h0 := grid.surface_y(from.x, from.z)
+	var best := Vector3.INF
+	var best_score := -INF
+	for _try in 10:
+		var ang := _rng.randf() * TAU
+		var dist := _rng.randf_range(2.0, 6.0)
+		var to := from + Vector3(sin(ang), 0.0, cos(ang)) * dist
+		if not grid.has_ice_at(to.x, to.z):
+			continue
+		var h := grid.surface_y(to.x, to.z)
+		if h < 0.25:
+			continue
+		var ok := true
+		var prev := h0
+		var steps := int(ceil(dist / 0.6))
+		for k in range(1, steps + 1):
+			var p := from.lerp(to, float(k) / steps)
+			var hp := grid.surface_y(p.x, p.z)
+			if hp - prev < -DROP or hp - prev > CLIMB:
+				ok = false
+				break
+			prev = hp
+		if not ok:
+			continue
+		var worn := grid.original_top(to.x, to.z) - h   # how much has melted off here already
+		var score := -worn + _rng.randf() * 0.5
+		if score > best_score:
+			best_score = score
+			best = Vector3(to.x, h, to.z)
+	if best != Vector3.INF:
+		return [best, true]
+	return [grid.nearby_surface_point(from, _rng, 4.0), false]
 
 
 func _pose(w: Dictionary, walk: float, work: float, party: bool) -> void:

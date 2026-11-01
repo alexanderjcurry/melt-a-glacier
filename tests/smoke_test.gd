@@ -58,6 +58,8 @@ func _run() -> void:
 	await _frames(3)
 	var grid = gs.grid
 	var player = gs.player
+	grid.find_floating_now()
+	check(grid.floating_count() == 0, "a fresh glacier has no floating ice")
 	check(grid != null and grid.total > 20000, "glacier built (%d points, %.0f m3)" % [grid.total, grid.volume_left()])
 	check(grid.remaining == grid.total, "glacier starts full")
 	check(not player.collides(player.position), "player spawns in free space at %s" % player.position)
@@ -191,6 +193,51 @@ func _run() -> void:
 	grid.damage_sphere(marker.position, 1.2, 1e9)
 	check(gs.discovered[find], "melting around it discovers %s" % Balance.DISCOVERIES[find].name)
 	check(marker.visible, "the find shows up in the world")
+
+	# --- Helpers melt a thin layer as they walk instead of digging pits.
+	gs.buy_helper(1)
+	for _i in 6:
+		gs.buy_helper(0)
+	world.helpers.set_process(false)
+	var tops0: PackedFloat32Array = grid.col_top.duplicate()
+	var vol0: float = grid.volume_left()
+	for _i in 400:   # 20 s of helper time
+		world.helpers._process(0.05)
+	world.helpers.set_process(true)
+	var touched := 0
+	var deep := 0
+	for c in tops0.size():
+		if tops0[c] > 0.0:
+			var dent: float = tops0[c] - maxf(grid.col_top[c], 0.0)
+			if dent > 0.05:
+				touched += 1
+			if dent > 1.2:
+				deep += 1
+	# (Digging pits instead touches ~170 spots, most of them more than 1.2 m deep.)
+	check(vol0 - grid.volume_left() > 20.0 and touched > 400 and deep < touched / 20,
+		"helpers wear the ice down evenly (%.0f m³ in 20 s over %d spots, %d deeper than 1.2 m)" % [vol0 - grid.volume_left(), touched, deep])
+
+	# --- Ice left floating in the air melts away by itself, slowly.
+	grid.find_floating_now()   # (first let any crumbs the helpers left melt)
+	for _i in 60:
+		grid._melt_floating(0.2)
+	var cave := Vector3(11.5, 2.5, -17.0)
+	var ff: PackedFloat32Array = grid.f
+	for s in ff.size():
+		var d: Vector3 = (grid.point_pos(s) - cave).abs()
+		if d.x <= 2.01 and d.y <= 2.01 and d.z <= 2.01 and not (d.x <= 1.01 and d.y <= 1.01 and d.z <= 1.01):
+			ff[s] = 0.0
+	grid.f = ff
+	grid._count()
+	grid._touch(0, grid.nx - 1, 0, grid.nz - 1)
+	grid.find_floating_now()
+	var floating: int = grid.floating_count()
+	var fade := 0.0
+	while grid.floating_count() > 0 and fade < 12.0:
+		grid._melt_floating(0.2)
+		fade += 0.2
+	check(floating == 125 and grid.floating_count() == 0 and fade > 3.0,
+		"a block of ice left floating drips away (%d bits, gone after %.1f s)" % [floating, fade])
 
 	# --- Glacier save string round trip (into a second, fresh glacier).
 	var saved: String = grid.to_save_string()
