@@ -6,8 +6,8 @@ config_version=5
 [application]
 
 config/name="A Game About Melting A Glacier"
-config/description="Melt a glacier, one hair dryer at a time."
-run/main_scene="res://scenes/main.tscn"
+config/description="Walk a glacier in first person and melt it, one hair dryer at a time."
+run/main_scene="res://scenes/world.tscn"
 config/features=PackedStringArray("4.4", "GL Compatibility")
 config/icon="res://icon.svg"
 
@@ -18,13 +18,11 @@ Monetization="*res://scripts/monetization/monetization.gd"
 
 [display]
 
-window/size/viewport_width=720
-window/size/viewport_height=1280
-window/size/window_width_override=405
-window/size/window_height_override=720
+window/size/viewport_width=1280
+window/size/viewport_height=720
 window/stretch/mode="canvas_items"
 window/stretch/aspect="expand"
-window/handheld/orientation=1
+window/handheld/orientation=4
 
 [input_devices]
 

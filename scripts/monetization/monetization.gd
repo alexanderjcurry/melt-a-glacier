@@ -4,7 +4,7 @@ extends Node
 ## Usage from game code:
 ##   Monetization.show_rewarded(Monetization.PLACEMENT_BOOST, func(ok): if ok: GameState.start_boost())
 ##   Monetization.buy(Monetization.PRODUCT_REMOVE_ADS_2X)
-##   Monetization.maybe_show_interstitial("layer_clear")
+##   Monetization.maybe_show_interstitial("shed_exit")
 ##
 ## Swapping in real SDKs: implement a MonetizationProvider subclass (see
 ## README "Adding real ads & purchases") and return it from _create_provider().
@@ -81,7 +81,8 @@ func _on_rewarded_failed(placement: String, reason: String) -> void:
 func maybe_show_interstitial(placement: String) -> void:
 	if GameState.owns_remove_ads_2x:
 		return
-	if GameState.layer_index < Balance.INTERSTITIAL_MIN_LAYER:
+	var grid: IceGrid = GameState.grid
+	if grid == null or 1.0 - grid.fraction_left() < Balance.INTERSTITIAL_MIN_PROGRESS:
 		return
 	var t := Time.get_unix_time_from_system()
 	if t - _last_interstitial < Balance.INTERSTITIAL_COOLDOWN:

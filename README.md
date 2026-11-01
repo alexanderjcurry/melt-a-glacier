@@ -1,16 +1,27 @@
 # A Game About Melting A Glacier (prototype)
 
-A portrait, one-thumb incremental game made in **Godot 4.4**. Tap or hold on the
-glacier to melt it, earn meltwater, buy hotter tools and helpers, dig up frozen
-junk, and free the village underneath.
+A first-person, landscape incremental game made in **Godot 4.4**. You walk around
+a valley that's buried under a glacier, aim a hair dryer at the ice and melt it
+block by block. Meltwater is money: spend it at the shed on hotter tools,
+upgrades and helpers (penguins with tiny torches, a sauna crew, an adopted
+volcano called Kevin). Frozen junk melts out as you dig, and at the very bottom
+there's a whole village. Melt the last block and summer comes back.
 
 ## Play it on your phone (iPhone or Android)
 
 **https://alexanderjcurry.github.io/melt-a-glacier/**
 
-Open the link in Safari (or Chrome on Android). For a full-screen, app-like
-version on iPhone, tap **Share > Add to Home Screen** and launch it from the
-new icon. Progress is saved in the browser.
+Open the link in Safari (or Chrome on Android) and turn the phone sideways.
+For a full-screen, app-like version on iPhone, tap **Share > Add to Home Screen**
+and launch it from the new icon. Progress is saved in the browser.
+
+| Phone | Computer |
+|---|---|
+| Left thumb: drag anywhere on the left side to walk | WASD or arrow keys |
+| Right thumb: drag to look around | Click once, then move the mouse |
+| Hold the 🔥 button to melt (you can drag from it to aim) | Hold the left mouse button |
+| JUMP button (also climbs 2-block ledges) | Space |
+| "Enter the shed" button appears at the shed door | E at the shed door, Esc to leave |
 
 Every push to `main` rebuilds and republishes this link automatically
 (`.github/workflows/web.yml`: it imports the project, runs the smoke test,
@@ -19,21 +30,22 @@ repo's **Actions** tab; a new version is live a minute or two after it goes gree
 It needs **Settings > Pages > Source: GitHub Actions** (one-time) and a public
 repo (or GitHub Pro for a private one).
 
-The web build is a playtest build. It runs at real speed, includes the
-developer tools (bottom of the Shop tab), and fakes ads and purchases.
-Real ads and in-app purchases only work in the native app builds.
+The web build is a playtest build. It includes the developer tools (bottom of
+the shed's Shop tab) and fakes ads and purchases. Real ads and in-app purchases
+only work in the native app builds.
 
 ## Run it on Windows (5 minutes)
 
 1. Download **Godot 4.4.x (Standard, not .NET)** from https://godotengine.org/download/windows/ and unzip it. There's no installer.
 2. Open Godot, click **Import**, and pick `project.godot` in this folder.
-3. Press **F5** (or the ▶ button). The game opens in a phone-shaped window. Click to tap, and hold the mouse button to keep melting.
+3. Press **F5** (or the ▶ button). Click in the window to grab the mouse.
 
 The first import shows a few font warnings (`_font_get_glyph_contours`). Those are harmless and come from the emoji font.
 
 The project uses Godot's **Compatibility** renderer (OpenGL ES 3 / WebGL 2).
-It's the recommended choice for 2D mobile games, runs on the widest range of
-phones, and is the only renderer the web build supports.
+It runs on the widest range of phones and is the only renderer the web build
+supports. On phones the 3D view is drawn at a lower resolution than the HUD so
+it stays smooth (`World._fit_render_scale()`).
 
 ## Play it on an Android phone (native app)
 
@@ -51,44 +63,55 @@ iOS comes later through Codemagic (Godot workflow). Nothing in the code is Andro
 
 | Feature | Where |
 |---|---|
-| Tap = 1 burst, hold = 5 taps/sec, with steam, heat glow, floating numbers and screen shake on layer breaks | `scripts/glacier_view.gd` |
-| 12 ice layers that shrink visibly, from Fresh Snow down to The Last Chunk | `Balance.LAYERS / LAYER_HP` |
-| 6 tools: Hair Dryer, Heat Lamp, Blowtorch, Flamethrower, Lava Hose, Orbital Mirror (gated by depth) | `Balance.TOOLS` |
-| 4 stats: Heat Output, Tool Size, Auto-Melt Rate, Steam Sell multiplier | `Balance.STATS` |
-| 5 helpers: Penguins with tiny torches, Sauna Crew, an adopted volcano, a Hot Spring Resort, a Sun-Lens Satellite. They stand on the ice | `Balance.HELPERS` |
-| 11 buried finds (mammoth, snowmobile, 1970s caveman...) that melt out and sell for a cash burst, plus a collection log (Finds tab) | `Balance.DISCOVERIES` |
-| Offline earnings: helpers keep working at 50% for up to 8h, with an optional "watch ad to double" | `GameState.check_offline()` |
-| Rewarded ad: 2x heat for 5 min (stacks to 15) | boost bar + Shop |
-| IAP: Remove Ads + permanent 2x ($2.99), Golden Hair Dryer cosmetic ($0.99), Restore | Shop tab |
-| Light interstitials: only after layer 3, at most one every 4 min, never if Remove Ads is owned | `Monetization.maybe_show_interstitial()` |
-| Ending: the village appears, the valley turns green, and a stats screen you can screenshot, then "Melt a new glacier" | `main.gd _show_win()` |
-| Autosave every 10s and when the app is backgrounded (`user://save.json`) | `GameState` |
+| The glacier: ~4,600 one-metre ice blocks in 8 layers by depth (Fresh Snow 1 hp down to The Last Chunk 128 hp). Deeper ice is harder and worth more. Drawn with one MultiMesh | `scripts/ice_grid.gd`, `Balance.LAYERS` |
+| First-person walking with voxel collision, auto step-up, jumping and ledge climbing (no physics engine) | `scripts/player.gd` |
+| The heat tool: aim with the crosshair, hold to melt a ball of ice, flame and steam effects | `Player._update_tool()` |
+| 6 tools bought in order at the shed: Hair Dryer, Heat Lamp, Blowtorch, Flamethrower, Lava Hose, Orbital Mirror | `Balance.TOOLS` |
+| 5 upgrades: Heat Output, Wider Nozzle, Longer Reach, Steam Sell, Crampon Boots | `Balance.UPGRADES` |
+| Helpers: penguins and the sauna crew walk on the ice melting it, Kevin the volcano lobs lava bombs | `scripts/helpers.gd`, `Balance.HELPERS` |
+| 11 buried finds frozen at fixed depths (mitten, snowmobile, mammoth, 1970s caveman, dinosaur egg...). They melt out, sell for a burst of water, and stay in the world | `World._place_finds()`, `Balance.DISCOVERIES` |
+| A village frozen inside the glacier. The church spire pokes out of the top as a hint | `World._build_village()` |
+| The valley greens up and flowers bloom where the ice is gone; villagers come out at the end | `World._update_slow()` |
+| Offline melting: helpers keep working at 25% for up to 4 h, with "watch an ad to double it" | `GameState.check_offline()` |
+| Rewarded ad: 2x heat for 5 min (stacks to 15). IAP: Remove Ads + permanent 2x, Golden Hair Dryer, Restore | HUD button, shed Shop tab |
+| Light interstitials: only when leaving the shed, after 15% of the ice is gone, at most every 4 min, never with Remove Ads | `Monetization.maybe_show_interstitial()` |
+| Ending with a stats screen, then walk around the village or melt a new glacier | `Hud.show_ending()` |
+| Short onboarding hints the first time | `World._update_coach()` |
+| Autosave every 10s and when the app is backgrounded (`user://save3d.json`), glacier included | `GameState` |
 
-**Developer menu:** when you run from the editor, and in exports tagged `playtest` (the web build), the bottom of the **Shop** tab has free meltwater, a x10/x100 game-speed toggle, "simulate 2h away", and wipe save. Other release exports hide it. Remove `playtest` from the Web preset's `custom_features` before a public launch.
+**Developer menu:** when you run from the editor, and in exports tagged `playtest` (the web build), the bottom of the shed's **Shop** tab has free meltwater, a x10/x100 melting speed toggle, "simulate 2h away", "melt everything" and "start over". Other release exports hide it. Remove `playtest` from the Web preset's `custom_features` before a public launch.
 
 ## Project layout
 
 ```
-project.godot            720x1280 portrait, Compatibility renderer, autoloads
+project.godot            1280x720 landscape, Compatibility renderer, autoloads
 export_presets.cfg       Web (playtest) and Android export presets
 .github/workflows/web.yml  builds + publishes the phone-playable web version
-scenes/main.tscn         the only scene (UI is built in code)
-scripts/balance.gd       ALL tunable numbers: layers, tools, stats, helpers, finds, ad rules
-scripts/game_state.gd    autoload: economy, melting, offline, save/load
-scripts/glacier_view.gd  draws the valley/glacier and handles touch
-scripts/main.gd          HUD, shop tabs, toasts, popups, ending
+scenes/world.tscn        the only scene; everything is built in code
+scripts/balance.gd       ALL tunable numbers: layers, tools, upgrades, helpers, finds, ad rules
+scripts/game_state.gd    autoload: economy, shed purchases, offline, save/load
+scripts/world.gd         builds the valley (sky, mountains, village, shed) and wires everything up
+scripts/ice_grid.gd      the glacier: block data, melting, raycasts, collision, save string
+scripts/player.gd        first-person movement, collision, the heat tool
+scripts/touch_controls.gd  phone controls (multi-touch stick, look, melt, jump)
+scripts/helpers.gd       penguins, sauna crew, Kevin the volcano
+scripts/hud.gd           HUD, shed menu, toasts, popups, ending
+scripts/ui_theme.gd      shared UI look, emoji font, particle texture
 scripts/shop_row.gd      one shop list row
 scripts/fmt.gd           1.23K / 4.5M number formatting
 scripts/monetization/    ad + IAP interface, stub provider, autoload facade
 fonts/                   subset Noto Color Emoji (the placeholder art) + license
 tests/smoke_test.gd      headless test: godot --headless -s res://tests/smoke_test.gd
-tools/pacing_sim.py      greedy-player simulation used to tune balance.gd
+tests/screenshots.gd     renders screenshots of key moments (see the top of the file)
 tools/subset_emoji.sh    rebuild the emoji font if you add new emoji
 ```
 
 ## Tuning the pacing
 
-Every number lives in `scripts/balance.gd`. `tools/pacing_sim.py` mirrors it. With the current numbers, a perfect player who holds the screen half the time finishes in about **1 hour**, and one who holds a quarter of the time takes about **1.7 hours**. Real players buy less efficiently and take breaks, so expect roughly 2 to 4 hours. That is an estimate until real people playtest it. To make the game longer, raise the later `LAYER_HP` entries.
+Every number lives in `scripts/balance.gd`. The whole glacier is about 81,000 hp,
+and a block pays out its hp in meltwater (times the Steam Sell upgrade). To make
+the game longer, raise the deeper `LAYERS` hp values (and the tool costs with
+them). The first playtests will tell us how long a run really takes.
 
 ## Adding real ads and purchases later
 
@@ -104,4 +127,8 @@ No game code changes beyond that.
 
 ## Placeholder art
 
-The visuals are drawn with shapes, and the objects are emoji from a bundled Noto Color Emoji subset (Apache 2.0 / OFL, see `fonts/`). If you add a new emoji to the code, re-run `tools/subset_emoji.sh`, or it shows as a box. Swapping in real sprites later means replacing the `_text(icon...)` calls in `glacier_view.gd` with `draw_texture`.
+Everything is simple shapes built in code (boxes, cones, prisms), and the
+characters and finds are emoji drawn as 3D labels, from a bundled Noto Color
+Emoji subset (Apache 2.0 / OFL, see `fonts/`). If you add a new emoji to the
+code, re-run `tools/subset_emoji.sh`, or it shows as a box. Real models can
+replace the shapes one at a time (the shed, the houses, the helpers).
