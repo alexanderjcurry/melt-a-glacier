@@ -102,3 +102,24 @@ const VALLEY := {
 
 static func current() -> Dictionary:
 	return VALLEY
+
+
+## Every map, in the order they come out. Only the first is built so far; the
+## rest are on the level menu after the ending, stamped COMING SOON, to show
+## what's on the way (LevelMenu). "ready" maps can be played.
+const MAPS := [
+	{"name": "Alpine Valley", "icon": "🏔️", "ready": true,
+		"blurb": "A mountain village under a glacier, and a whole frozen lake behind it."},
+	{"name": "Frozen Harbor", "icon": "⚓",
+		"blurb": "A fishing town and its whole fleet, frozen mid-catch."},
+	{"name": "Arctic Research Base", "icon": "📡",
+		"blurb": "The scientists froze along with their experiments. Careful what you thaw."},
+	{"name": "Ice Cave City", "icon": "💎",
+		"blurb": "A whole city deep under the ice, lit by glowing crystals."},
+	{"name": "Mammoth Graveyard", "icon": "🦣",
+		"blurb": "The herd never made it out of the Ice Age. Until now."},
+	{"name": "Frozen Volcano", "icon": "🌋",
+		"blurb": "Fire trapped under the ice. Is this where Kevin comes from?"},
+	{"name": "The Polar Cap", "icon": "🧭",
+		"blurb": "The biggest ice in the world. The very last glacier."},
+]

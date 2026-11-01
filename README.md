@@ -86,7 +86,7 @@ iOS comes later through Codemagic (Godot workflow). Nothing in the code is Andro
 | The catalogue: a button at the top right of the HUD (C or Tab on a computer), or the book in the shed. Free bonuses for a rewarded ad: 2x heat for 5 min (stacks to 15), helpers work 3x for 3 min, and double your water (capped at about 4 minutes of your recent income). IAP: Remove Ads + permanent 2x, Golden Hair Dryer, Restore | `Hud.open_catalogue()`, `Balance.AD_REWARDS`, `GameState.grant_ad_reward()` |
 | Timed ad offers: now and then a paper tag swings down under the catalogue button ("FREE BONUS: Double your water, +💧 70K, enough for the Flamethrower!"). Tap it (or press B) to watch. Kept gentle on purpose: none in the first 2.5 minutes, one at a time, gone after 40 s, the next one waits longer each time you let one pass (200 s up to 8 min), only offers that are worth having right now, and never one whose ad hasn't loaded. After you choose a rewarded ad, no interstitial for a while | `scripts/ad_offers.gd`, `Balance.OFFER_*`, `Hud._update_offer()` |
 | Light interstitials: only when leaving the shed, after 15% of the ice is gone, at most every 4 min, never with Remove Ads | `Monetization.maybe_show_interstitial()` |
-| A popup when the village is free, an ending with a stats screen when the lake is, then walk around or melt a new valley | `Hud.show_stage_done()`, `Hud.show_ending()` |
+| A popup when the village is free, an ending with a stats screen when the lake is, then walk around or open "Where to next?": the valley to melt again, and the maps still to come (Frozen Harbor, Arctic Research Base, Ice Cave City, Mammoth Graveyard, Frozen Volcano, The Polar Cap) stamped COMING SOON. It's in the catalogue too once you've won | `Hud.show_stage_done()`, `Hud.show_ending()`, `scripts/level_menu.gd`, `Levels.MAPS` |
 | Short onboarding hints the first time | `World._update_coach()` |
 | Autosave every 10s and when the app is backgrounded (`user://save3d.json`), glacier included | `GameState` |
 
@@ -114,6 +114,7 @@ scripts/mesh_kit.gd      tiny modelling kit (ellipsoids, cylinders, boxes) for t
 scripts/touch_controls.gd  phone controls (multi-touch stick, look, melt, jump)
 scripts/helpers.gd       penguins, sauna crew, Kevin the volcano
 scripts/hud.gd           HUD, shed price card, catalogue, toasts, popups, ending
+scripts/level_menu.gd    "Where to next?": every map after the ending, the unbuilt ones stamped COMING SOON
 scripts/ui_theme.gd      shared UI look, emoji font, particle texture
 scripts/shop_row.gd      one catalogue row
 scripts/ad_offers.gd     when the HUD's timed ad-offer tag shows up, and which reward it offers

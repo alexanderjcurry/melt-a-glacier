@@ -561,6 +561,27 @@ func _run() -> void:
 	check(won[0] and gs.has_won, "melting the frozen lake wins")
 	check(not gs.discovered.has(false), "every find was discovered")
 
+	# --- After the ending: the level menu shows what's coming next.
+	var melt_new: Button = null
+	for b in world.hud.popups.find_children("*", "Button", true, false):
+		if (b as Button).text == "Melt a new glacier":
+			melt_new = b
+	check(melt_new != null, "the ending offers a new glacier")
+	if melt_new != null:
+		melt_new.pressed.emit()
+		await _frames(2)
+		var menu = world.hud.popups.get_child(world.hud.popups.get_child_count() - 1)
+		var soon := 0
+		for c in menu.cards:
+			if c.find_child("Stamp", true, false) != null:
+				soon += 1
+		check(menu.has_signal("closed") and menu.cards.size() == Levels.MAPS.size()
+			and menu.cards[0].find_child("Play", true, false) != null and soon == Levels.MAPS.size() - 1,
+			"a new glacier opens the level menu: the valley again, and %d coming soon" % soon)
+		menu.close()
+		await _frames(2)
+		check(world.hud.popups.get_child_count() == 0 and player.input_enabled, "closing the level menu goes back to the valley")
+
 	# --- Game state save round trip.
 	gs.save_game()
 	var water_saved: float = gs.water

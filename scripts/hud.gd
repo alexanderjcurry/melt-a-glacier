@@ -3,7 +3,8 @@ extends CanvasLayer
 ## Everything drawn over the 3D view: meltwater, glacier progress, crosshair,
 ## phone controls, toasts, the card for whatever you're looking at in the shed,
 ## the catalogue (a button at the top right, or the book in the shed), the
-## timed ad-offer tag that hangs under it now and then (AdOffers), and popups.
+## timed ad-offer tag that hangs under it now and then (AdOffers), popups, and
+## the level menu after the ending (LevelMenu).
 ## Built in code.
 
 const PAPER := Color(0.97, 0.93, 0.83)
@@ -936,6 +937,11 @@ func _row(icon: String, title: String, desc: String) -> ShopRow:
 
 
 func _build_catalogue_rows() -> void:
+	if GameState.has_won:   # after the ending: on to the level menu
+		_section("🗺️ Where to next?")
+		var next := _row("🗺️", "Pick your next glacier", "See what's coming soon, or melt the valley again.")
+		next.set_button("Open", true)
+		next.button.pressed.connect(show_levels)
 	_section("📺 Free, for watching a short ad")
 	for k in Balance.AD_REWARDS:
 		_ad_row(k)
@@ -1119,5 +1125,19 @@ func show_ending() -> void:
 	var p := _popup("☀️ THE END ☀️", body)
 	_popup_button(p, "Walk around the village", Color(0.36, 0.6, 0.86), func(): _close_popup(p))
 	_popup_button(p, "Melt a new glacier", Color(0.95, 0.55, 0.2), func():
-		GameState.wipe_save()
-		get_tree().reload_current_scene())
+		_close_popup(p)
+		show_levels())
+
+
+func show_levels() -> void:
+	## Where to next: the map you just melted (play it again) and the ones
+	## coming soon (LevelMenu).
+	if catalogue_open:
+		close_catalogue()
+	Input.mouse_mode = Input.MOUSE_MODE_VISIBLE
+	player.input_enabled = false
+	touch.release_all()
+	touch.visible = false
+	var menu := LevelMenu.new()
+	popups.add_child(menu)
+	menu.closed.connect(func(): _close_popup({"root": menu}))
