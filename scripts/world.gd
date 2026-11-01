@@ -98,6 +98,10 @@ func _ready() -> void:
 
 	player = Player.new()
 	player.grid = grid
+	# You can walk anywhere on the valley floor, all the way round the glacier.
+	var v: Dictionary = level.valley
+	player.bounds_min = Vector3(-(float(v.half_width) - 1.5), -1.0, float(v.back_z) + 1.5)
+	player.bounds_max = Vector3(float(v.half_width) - 1.5, 80.0, 20.0)
 	add_child(player)
 	var pos := GameState.player_pos if GameState.player_pos.is_finite() else SPAWN
 	pos.x = clampf(pos.x, player.bounds_min.x + 0.5, player.bounds_max.x - 0.5)

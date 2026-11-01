@@ -117,7 +117,7 @@ func _run() -> void:
 	# Kevin, seen from the back corner of the valley.
 	player.position = Vector3(-16.0, 9.0, -20.0)
 	player.velocity = Vector3.ZERO
-	_aim_at(player, Vector3(-27.0, 7.0, -38.0))
+	_aim_at(player, Vector3(-30.0, 7.0, -47.0))
 	await _frames(3)
 	await _shot("04d_kevin")
 

@@ -13,7 +13,7 @@ const VALLEY := {
 		"height": 8.3,              # thickness in the middle, behind full_z
 		"half_width_back": 15.6,
 		"half_width_snout": 12.5,
-		"back_z": -28.5,            # where it disappears into the back mountains
+		"back_z": -28.5,            # its back end (the valley floor goes on behind it)
 		"full_z": -12.0,            # full thickness behind this line
 		"snout_z": 4.6,             # the toe of the glacier
 		"bumps": 0.55,              # metres of lumpiness
@@ -22,7 +22,7 @@ const VALLEY := {
 	# everywhere else (see Scenery). Distances in metres.
 	"valley": {
 		"half_width": 22.5,       # the side walls start just past where you can walk (x = ±21)
-		"back_z": -29.5,          # the back wall, where the glacier comes down from
+		"back_z": -37.5,          # the back wall: the glacier ends at -29.5, so you can walk round it
 		"front_z": 64.0,          # the valley floor ends here (the lake reaches further)
 		"flare_z": 21.0,          # past here the valley opens out toward the lake
 		"flare": 1.0,             # metres wider per metre further out

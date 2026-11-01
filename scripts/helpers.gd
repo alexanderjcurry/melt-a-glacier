@@ -7,7 +7,7 @@ extends Node3D
 
 const WALKER_TYPES := [0, 1]           # indices into Balance.HELPERS that walk
 const VOLCANO_TYPE := 2
-const VOLCANO_POS := Vector3(-27.0, 13.0, -38.0)
+const VOLCANO_POS := Vector3(-30.0, 13.0, -47.0)   # in his hollow, clear of the path behind the glacier
 const WALK_SPEED := [1.2, 0.95]        # m/s, per walker type
 # Their heat lands in a few small, shallow spots scattered around them (the
 # sauna crew's hot stones warm a wide circle), so the ice wears down a little

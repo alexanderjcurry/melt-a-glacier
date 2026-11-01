@@ -13,7 +13,7 @@ const WORLD_LAYER := 1        # ground, houses, the shed, rocks, trees
 const ICE_LAYER := 2
 
 var grid: IceField
-var bounds_min := Vector3(-21.0, -1.0, -27.0)
+var bounds_min := Vector3(-21.0, -1.0, -36.0)   # where you can walk (the world sets these from the level)
 var bounds_max := Vector3(21.0, 80.0, 20.0)
 
 # Set by the controls every frame.

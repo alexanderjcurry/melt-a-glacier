@@ -210,6 +210,14 @@ func _run() -> void:
 	check(player.position.distance_to(world.SPAWN) > 3.0, "letting go of Space doesn't press the Respawn button (PC)")
 	world.hud.set_touch_mode(true)
 
+	# --- You can walk all the way round the glacier, behind it too.
+	player.respawn(Vector3(-19.0, 0.0, -34.5), -PI / 2.0)   # back left corner, facing +x
+	player.move_input = Vector2(0, 1)
+	for _i in 720:
+		player._move(1.0 / 60.0)
+	player.move_input = Vector2.ZERO
+	check(player.position.x > 19.0, "walked all the way behind the glacier (to x=%.1f)" % player.position.x)
+
 	# --- The shed: walk in through the door, look at things and buy them.
 	gs.grant_water(1e6)
 	var shed = world.shed
