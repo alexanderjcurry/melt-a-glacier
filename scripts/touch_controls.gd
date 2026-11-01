@@ -286,45 +286,55 @@ func _flash(c: Control) -> void:
 	c.create_tween().tween_property(c, "modulate", Color.WHITE, 0.25)
 
 
+func _disc(center: Vector2, radius: float, tint: Color) -> void:
+	## A round enamel button (ui/disc.png: ink rim, lip and gloss), tinted.
+	var r := radius * 256.0 / 224.0   # the disc fills 224 of the image's 256 px
+	draw_texture_rect(UiTheme.tex("disc"), Rect2(center - Vector2(r, r), Vector2(r, r) * 2.0), false, tint)
+
+
 func _draw() -> void:
-	var font := get_theme_default_font()
-	# Joystick
+	var font := UiTheme.display_font()
+	# Joystick: a wooden hoop with a knob.
 	var base := _stick_origin if _stick_finger != NONE else stick_home()
 	var knob := _stick_pos if _stick_finger != NONE else base
-	var a := 0.55 if _stick_finger != NONE else 0.28
-	draw_circle(base, STICK_RADIUS, Color(1, 1, 1, a * 0.35))
-	draw_arc(base, STICK_RADIUS, 0, TAU, 48, Color(1, 1, 1, a), 3.0)
-	draw_circle(knob, 34.0, Color(1, 1, 1, a + 0.15))
+	var a := 0.95 if _stick_finger != NONE else 0.6
+	var rr := STICK_RADIUS * 256.0 / 224.0
+	draw_texture_rect(UiTheme.tex("stick_ring"), Rect2(base - Vector2(rr, rr), Vector2(rr, rr) * 2.0), false, Color(1, 1, 1, a))
+	_disc(knob, 36.0, Color(1.0, 0.95, 0.85, a))
 	if _stick_finger == NONE:
-		_label(font, "MOVE", base + Vector2(0, STICK_RADIUS + 26), 20, Color(1, 1, 1, 0.55))
+		_label(font, "MOVE", base + Vector2(0, STICK_RADIUS + 24), 22, Color(1, 1, 1, 0.8))
 	# Melt button (or the shop button in the shed)
 	var mc := melt_center()
+	var press := Vector2(0, 5) if _melt_finger != NONE else Vector2.ZERO
 	if action_text != "":
-		var col := Color(0.2, 0.6, 0.3, 0.92) if action_ok else Color(0.42, 0.39, 0.36, 0.82)
-		draw_circle(mc, MELT_RADIUS, col)
-		draw_arc(mc, MELT_RADIUS, 0, TAU, 48, Color(1, 1, 1, 0.9), 4.0)
-		var big := 40 if action_text.length() <= 4 else 30
-		_label(font, action_text, mc + Vector2(0, -12 if action_sub != "" else 0), big, Color.WHITE)
+		var col := Color(0.4, 0.78, 0.42) if action_ok else Color(0.66, 0.62, 0.58, 0.9)
+		_disc(mc + press, MELT_RADIUS, col)
+		var big := 44 if action_text.length() <= 4 else 32
+		_label(font, action_text, mc + press + Vector2(0, -12 if action_sub != "" else 0), big, UiTheme.CREAM)
 		if action_sub != "":
-			_label(font, action_sub, mc + Vector2(0, 34), 24, Color.WHITE)
+			_label(font, action_sub, mc + press + Vector2(0, 34), 26, UiTheme.CREAM)
 	else:
-		var hot := Color(1.0, 0.45, 0.12, 0.9 if melting else 0.6)
-		draw_circle(mc, MELT_RADIUS, hot)
-		draw_arc(mc, MELT_RADIUS, 0, TAU, 48, Color(1, 0.9, 0.7, 0.9), 4.0)
-		_label(font, "🔥", mc + Vector2(0, -14), 52, Color.WHITE)
-		_label(font, "HOLD TO MELT", mc + Vector2(0, 46), 19, Color.WHITE)
+		var hot := Color(1.0, 0.56, 0.22, 1.0 if melting else 0.82)
+		_disc(mc + press, MELT_RADIUS, hot)
+		_label(font, "🔥", mc + press + Vector2(0, -16), 54, Color.WHITE)
+		_label(font, "HOLD TO MELT", mc + press + Vector2(0, 44), 21, UiTheme.CREAM)
 	# Jump / jetpack button, with the fuel gauge around it
 	var jc := jump_center()
-	draw_circle(jc, JUMP_RADIUS, Color(0.3, 0.55, 0.9, 0.75 if _jump_finger != NONE else 0.5))
-	draw_arc(jc, JUMP_RADIUS, 0, TAU, 40, Color(1, 1, 1, 0.8), 3.0)
+	var jp := Vector2(0, 4) if _jump_finger != NONE else Vector2.ZERO
 	if fuel < 0.999:
-		draw_arc(jc, JUMP_RADIUS + 9.0, 0, TAU, 48, Color(0, 0, 0, 0.35), 7.0)
-		var fc := Color(0.45, 0.9, 1.0) if fuel > 0.25 else Color(1.0, 0.5, 0.3)
-		draw_arc(jc, JUMP_RADIUS + 9.0, -PI / 2.0, -PI / 2.0 + TAU * fuel, 48, fc, 7.0)
-	_label(font, "JUMP", jc + Vector2(0, -8), 22, Color.WHITE)
-	_label(font, "hold = fly", jc + Vector2(0, 18), 15, Color(1, 1, 1, 0.85))
+		draw_arc(jc, JUMP_RADIUS + 12.0, 0, TAU, 48, UiTheme.INK, 11.0)
+		var fc := Color(0.5, 0.92, 1.0) if fuel > 0.25 else Color(1.0, 0.5, 0.3)
+		draw_arc(jc, JUMP_RADIUS + 12.0, -PI / 2.0, -PI / 2.0 + TAU * fuel, 48, fc, 6.0)
+	_disc(jc + jp, JUMP_RADIUS, Color(0.48, 0.72, 0.98, 0.95 if _jump_finger != NONE else 0.82))
+	_label(font, "JUMP", jc + jp + Vector2(0, -8), 25, UiTheme.CREAM)
+	_label(font, "hold = fly", jc + jp + Vector2(0, 18), 15, UiTheme.CREAM)
 
 
 func _label(font: Font, s: String, center: Vector2, font_size: int, color: Color) -> void:
+	## Centred lettering with an ink outline.
 	var w := font.get_string_size(s, HORIZONTAL_ALIGNMENT_LEFT, -1, font_size).x
-	draw_string(font, Vector2(center.x - w * 0.5, center.y + font_size * 0.35), s, HORIZONTAL_ALIGNMENT_LEFT, -1, font_size, color)
+	var at := Vector2(center.x - w * 0.5, center.y + font_size * 0.35)
+	var outline := UiTheme.INK
+	outline.a = color.a
+	draw_string_outline(font, at, s, HORIZONTAL_ALIGNMENT_LEFT, -1, font_size, maxi(4, font_size / 4), outline)
+	draw_string(font, at, s, HORIZONTAL_ALIGNMENT_LEFT, -1, font_size, color)

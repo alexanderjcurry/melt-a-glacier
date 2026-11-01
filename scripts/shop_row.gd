@@ -61,8 +61,8 @@ func setup(icon: String, title: String, desc: String, paper: bool = false) -> vo
 	button.size_flags_vertical = Control.SIZE_SHRINK_CENTER
 	button.text = ""
 	if paper:
-		UiTheme.colored_button(button, Color(0.2, 0.5, 0.28), 10)
-		button.add_theme_stylebox_override("disabled", UiTheme.flat(Color(0.62, 0.56, 0.48), 10))
+		UiTheme.colored_button(button, Color(0.38, 0.7, 0.4))
+		button.add_theme_stylebox_override("disabled", UiTheme.enamel(Color(0.7, 0.64, 0.56)))
 		button.add_theme_color_override("font_disabled_color", Color(0.97, 0.94, 0.88))
 	h.add_child(button)
 

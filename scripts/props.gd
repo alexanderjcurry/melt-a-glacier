@@ -20,21 +20,11 @@ static var _cache := {}
 
 
 static func tool_mesh(i: int, golden: bool = false) -> ArrayMesh:
-	var key := "tool_%d_%s" % [i, golden]
-	if _cache.has(key):
-		return _cache[key]
-	var st := MeshKit.begin()
-	var col: Color = Balance.TOOLS[clampi(i, 0, Balance.TOOLS.size() - 1)].color
-	match i:
-		0: _hair_dryer(st, GOLD if golden else col)
-		1: _heat_lamp(st, col)
-		2: _blowtorch(st, col)
-		3: _flamethrower(st, col)
-		4: _lava_hose(st, col)
-		_: _mirror_remote(st, col)
-	var mesh := MeshKit.finish(st)
-	_cache[key] = mesh
-	return mesh
+	## Made in Blender (art/blender/build_tools.py). The parts in the "body"
+	## material take the tool's colour, or gold.
+	var t := clampi(i, 0, Balance.TOOLS.size() - 1)
+	var col: Color = GOLD if golden and t == 0 else Balance.TOOLS[t].color
+	return Models.baked("tools", "Tool%d" % t, {"body": col})
 
 
 static func upgrade_mesh(key: String) -> ArrayMesh:

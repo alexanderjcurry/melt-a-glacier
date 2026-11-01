@@ -29,8 +29,8 @@ const CHURCH_ROOF := 1.6
 const TOWER := [0, -12, 2, 2]              # in front of the nave
 const TOWER_TOP := 9.0                     # the spire on top pokes out of the ice
 const SPIRE := 3.8
-const VILLAGERS = ["👵", "👴", "🧒", "👩", "👨", "🐕", "🐈", "🐓"]
-const FLOWERS = ["🌼", "🌷", "🌸", "🌻"]
+const VILLAGERS = ["Grandma", "Grandpa", "Kid", "Woman", "Man", "Dog", "Cat", "Rooster"]   # meshes in characters.glb
+const FLOWERS = ["Daisy", "Tulip", "Cosmos", "Sunflower"]   # meshes in nature.glb
 
 var level: Dictionary = Levels.current()
 var grid: IceField             # the village glacier (the first glacier)
@@ -43,10 +43,10 @@ var solids: Array[AABB] = []
 
 var _ground_mat: StandardMaterial3D
 var _mountains: MeshInstance3D
-var _grass := Color(0.4, 0.62, 0.28)
+var _grass := Color(0.42, 0.57, 0.3)
 var _moraine := Color(0.55, 0.46, 0.34)
 var _mats := {}
-var _find_markers := {}        # discovery index -> Label3D
+var _find_markers := {}        # discovery index -> Node3D (see _make_find_marker)
 var _find_spots := {}          # discovery index -> where it's frozen (worked out on the fresh ice)
 var _gate: Node3D              # swings open when the village is free
 var _gate_shape: CollisionShape3D
@@ -54,7 +54,7 @@ var _gate_sign: Label3D
 var _lake_water: MeshInstance3D
 var _water_mat: Material
 var _flowers: Array = []       # {node, x, z, threshold}
-var _villagers: Array = []     # Label3D
+var _villagers: Array = []     # Node3D
 var _floats: Array = []        # {node, t}
 var _float_i := 0
 var _floats_this_frame := 0
@@ -417,29 +417,66 @@ func _arm_finds() -> void:
 				GameState.discover(d)
 
 
-func _make_find_marker(d: int) -> Label3D:
+# How big each find is (its longest side, in metres), in Balance.DISCOVERIES order.
+const FIND_SIZES := [0.6, 0.8, 0.7, 1.6, 1.8, 0.7, 1.3, 1.1, 0.8, 0.9, 0.8,
+	1.3, 2.6, 1.0, 5.0, 3.0, 2.6, 1.6]   # the lake glacier's finds: skater .. the sun's lost ray
+
+
+static var _lake_model: ArrayMesh
+
+
+static func find_mesh(d: int) -> Mesh:
+	## The model of find d (art/blender/build_finds.py); past the end, the
+	## glaciers themselves for the shed's last shelf slots: the village as a
+	## tiny house, then the frozen lake.
+	if d == Balance.DISCOVERIES.size() + 1:
+		return _frozen_lake_model()
+	if d >= Balance.DISCOVERIES.size():
+		return Models.baked("house_0")
+	return Models.baked("finds", "Find%d" % d)
+
+
+static func _frozen_lake_model() -> ArrayMesh:
+	## A little round of lake with a floe of ice on it.
+	if _lake_model == null:
+		var st := MeshKit.begin()
+		MeshKit.cylinder(st, Vector3(0, 0.0, 0), Vector3(0, 0.05, 0), 0.5, 0.5, Color(0.55, 0.42, 0.3), 24)
+		MeshKit.cylinder(st, Vector3(0, 0.05, 0), Vector3(0, 0.07, 0), 0.46, 0.46, Color(0.3, 0.72, 0.8), 24)
+		MeshKit.ellipsoid(st, Vector3(-0.05, 0.08, 0.02), Vector3(0.3, 0.1, 0.24), Color(0.9, 0.96, 1.0))
+		MeshKit.ellipsoid(st, Vector3(0.24, 0.07, -0.18), Vector3(0.1, 0.04, 0.08), Color(0.82, 0.93, 0.98))
+		_lake_model = MeshKit.finish(st)
+	return _lake_model
+
+
+func _make_find_marker(d: int) -> Node3D:
+	## A find in the ice: its model (resting 0.36 m below the marker's origin,
+	## see _settle_finds), turning slowly once found, with its name above.
 	var info: Dictionary = Balance.DISCOVERIES[d]
-	var l := Label3D.new()
-	l.text = info.icon
-	l.font_size = 128
-	l.pixel_size = 0.0055
-	l.billboard = BaseMaterial3D.BILLBOARD_FIXED_Y
-	l.alpha_cut = Label3D.ALPHA_CUT_DISCARD
-	l.visible = false
+	var size: float = FIND_SIZES[d] if d < FIND_SIZES.size() else 0.8
+	var m := Models.fitted(find_mesh(d), size, -0.36)
+	m.rotation.y = PI + float(d) * 0.7
+	m.visible = false
 	var name_tag := Label3D.new()
-	name_tag.text = info.name
+	name_tag.text = "%s %s" % [info.icon, info.name]
 	name_tag.font_size = 40
 	name_tag.pixel_size = 0.0007
 	name_tag.fixed_size = true
 	name_tag.outline_size = 10
+	UiTheme.sign_label(name_tag)
 	name_tag.billboard = BaseMaterial3D.BILLBOARD_ENABLED
-	name_tag.position = Vector3(0, 0.55, 0)
-	l.add_child(name_tag)
-	return l
+	name_tag.position = Vector3(0, -0.36 + (find_mesh(d).get_aabb().size.y / _longest(find_mesh(d))) * size + 0.25, 0)
+	m.add_child(name_tag)
+	m.move_child(name_tag, 0)
+	return m
+
+
+static func _longest(mesh: Mesh) -> float:
+	var s := mesh.get_aabb().size
+	return maxf(s.x, maxf(s.y, s.z))
 
 
 func _reveal_find(d: int, animate: bool) -> void:
-	var m: Label3D = _find_markers.get(d)
+	var m: Node3D = _find_markers.get(d)
 	if m == null:
 		return
 	m.visible = true
@@ -454,9 +491,10 @@ func _settle_finds(delta: float) -> void:
 	## Found things drop to whatever is under them as the ice melts away.
 	## Their name tags only show up close.
 	for d in _find_markers:
-		var m: Label3D = _find_markers[d]
+		var m: Node3D = _find_markers[d]
 		if not m.visible:
 			continue
+		m.rotation.y += delta * 0.5   # turning slowly, to show it off
 		(m.get_child(0) as Label3D).visible = m.position.distance_squared_to(player.position) < 49.0
 		var rest := _floor_under(m.position, glaciers[int(m.get_meta("glacier", 0))]) + 0.36
 		if m.position.y > rest + 0.001:
@@ -487,7 +525,7 @@ func _build_float_pool() -> void:
 		l.font_size = 56
 		l.pixel_size = 0.005
 		l.outline_size = 12
-		l.modulate = Color(0.75, 0.92, 1.0)
+		UiTheme.sign_label(l, Color(0.75, 0.92, 1.0))
 		l.billboard = BaseMaterial3D.BILLBOARD_ENABLED
 		l.no_depth_test = true
 		l.render_priority = 10
@@ -535,7 +573,7 @@ func _update_slow() -> void:
 	if _mountains != null:
 		(_mountains.material_override as ShaderMaterial).set_shader_parameter("foot_color", _ground_mat.albedo_color)
 	for f in _flowers:
-		var node: Label3D = f.node
+		var node: Node3D = f.node
 		if node.visible:
 			continue
 		var bloom := false
@@ -682,9 +720,10 @@ func _build_fence() -> void:
 	_box(Vector3(0.1, 1.75, 0.1), Vector3(sign_x + 0.8, 0.875, z - 0.25), dark)
 	_box(Vector3(1.95, 0.86, 0.06), Vector3(sign_x, 1.35, z - 0.3), Color(0.93, 0.88, 0.76))
 	_gate_sign = Label3D.new()
+	_gate_sign.font = UiTheme.display_font()
 	_gate_sign.font_size = 44
-	_gate_sign.pixel_size = 0.0031
-	_gate_sign.modulate = Color(0.25, 0.17, 0.1)
+	_gate_sign.pixel_size = 0.0037
+	_gate_sign.modulate = Color(0.3, 0.19, 0.11)
 	_gate_sign.outline_size = 0
 	_gate_sign.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	_gate_sign.position = Vector3(sign_x, 1.35, z - 0.34)
@@ -888,22 +927,26 @@ func _build_mountains() -> void:
 
 func _build_village() -> Array:
 	## Builds the frozen village and returns the boxes to carve out of the ice.
+	## The buildings are Blender models (art/blender/build_village.py); house i
+	## is models/house_i.glb, made to fit HOUSES[i]'s footprint.
 	var carve: Array = []
-	for hdef in HOUSES:
+	for i in HOUSES.size():
+		var hdef: Array = HOUSES[i]
 		var x := float(hdef[0])
 		var z := float(hdef[1])
 		var w := float(hdef[2])
 		var d := float(hdef[3])
-		_house(x, z, w, d, HOUSE_WALL, HOUSE_ROOF, hdef[4], hdef[5])
+		_model("house_%d" % i, Vector3(x + w * 0.5, 0.0, z + d * 0.5))
 		var box := AABB(Vector3(x, 0, z), Vector3(w, HOUSE_WALL + HOUSE_ROOF, d))
 		carve.append(box)
 		solids.append(box)
-	# The church, with a steeple tall enough to poke out of the top of the glacier.
+	# The church, with an onion-dome steeple tall enough to poke out of the top
+	# of the glacier. The model's origin is the nave's footprint corner.
 	var cx := float(CHURCH[0])
 	var cz := float(CHURCH[1])
 	var cw := float(CHURCH[2])
 	var cd := float(CHURCH[3])
-	_house(cx, cz, cw, cd, CHURCH_WALL, CHURCH_ROOF, Color(0.93, 0.93, 0.9), Color(0.45, 0.47, 0.55))
+	_model("church", Vector3(cx, 0.0, cz))
 	var nave := AABB(Vector3(cx, 0, cz), Vector3(cw, CHURCH_WALL + CHURCH_ROOF, cd))
 	carve.append(nave)
 	solids.append(nave)
@@ -911,58 +954,21 @@ func _build_village() -> Array:
 	var tz := float(TOWER[1])
 	var tw := float(TOWER[2])
 	var td := float(TOWER[3])
-	var stone := Color(0.86, 0.83, 0.76)
-	_box(Vector3(tw, TOWER_TOP, td), Vector3(tx + tw * 0.5, TOWER_TOP * 0.5, tz + td * 0.5), stone)
-	_box(Vector3(tw + 0.16, 0.25, td + 0.16), Vector3(tx + tw * 0.5, TOWER_TOP - 1.9, tz + td * 0.5), stone.darkened(0.2))
-	_box(Vector3(tw + 0.16, 0.2, td + 0.16), Vector3(tx + tw * 0.5, TOWER_TOP - 0.1, tz + td * 0.5), stone.darkened(0.2))
-	_box(Vector3(0.9, 1.6, 0.06), Vector3(tx + tw * 0.5, 0.8, tz + td + 0.03), Color(0.4, 0.25, 0.15))
-	# Belfry openings on all four sides, and a clock.
-	var dark := Color(0.12, 0.12, 0.16)
-	_box(Vector3(0.7, 1.0, 0.06), Vector3(tx + tw * 0.5, TOWER_TOP - 0.9, tz + td + 0.03), dark)
-	_box(Vector3(0.7, 1.0, 0.06), Vector3(tx + tw * 0.5, TOWER_TOP - 0.9, tz - 0.03), dark)
-	_box(Vector3(0.06, 1.0, 0.7), Vector3(tx - 0.03, TOWER_TOP - 0.9, tz + td * 0.5), dark)
-	_box(Vector3(0.06, 1.0, 0.7), Vector3(tx + tw + 0.03, TOWER_TOP - 0.9, tz + td * 0.5), dark)
-	var clock := CylinderMesh.new()
-	clock.top_radius = 0.42
-	clock.bottom_radius = 0.42
-	clock.height = 0.05
-	var face := _mesh(clock, Vector3(tx + tw * 0.5, TOWER_TOP - 2.8, tz + td + 0.03), Color(0.97, 0.95, 0.85))
-	face.rotation.x = PI / 2.0
-	_box(Vector3(0.05, 0.3, 0.04), Vector3(tx + tw * 0.5, TOWER_TOP - 2.68, tz + td + 0.07), dark)
-	_box(Vector3(0.22, 0.05, 0.04), Vector3(tx + tw * 0.5 + 0.1, TOWER_TOP - 2.8, tz + td + 0.07), dark)
-	var spire := _cone(Vector3(tx + tw * 0.5, TOWER_TOP, tz + td * 0.5), tw * 0.72, SPIRE, Color(0.35, 0.38, 0.5), 4)
-	spire.rotation.y = PI / 4.0
-	_box(Vector3(0.1, 0.7, 0.1), Vector3(tx + tw * 0.5, TOWER_TOP + SPIRE + 0.3, tz + td * 0.5), Color(0.95, 0.8, 0.3))
-	_box(Vector3(0.45, 0.1, 0.1), Vector3(tx + tw * 0.5, TOWER_TOP + SPIRE + 0.4, tz + td * 0.5), Color(0.95, 0.8, 0.3))
 	var tower := AABB(Vector3(tx, 0, tz), Vector3(tw, TOWER_TOP, td))
 	carve.append(tower)
 	solids.append(tower)
 	solids.append(AABB(Vector3(tx + tw * 0.5 - 0.5, TOWER_TOP, tz + td * 0.5 - 0.5), Vector3(1.0, SPIRE * 0.6, 1.0)))
 	# A well in the square.
-	var well := CylinderMesh.new()
-	well.top_radius = 0.7
-	well.bottom_radius = 0.7
-	well.height = 0.9
-	_mesh(well, Vector3(1.5, 0.45, -19.5), Color(0.55, 0.55, 0.58))
+	_model("well", Vector3(1.5, 0.0, -19.5))
 	solids.append(AABB(Vector3(0.8, 0, -20.2), Vector3(1.4, 0.9, 1.4)))
 	return carve
 
 
-func _house(x: float, z: float, w: float, d: float, wall: float, roof: float, wall_col: Color, roof_col: Color) -> void:
-	var cx := x + w * 0.5
-	var cz := z + d * 0.5
-	_box(Vector3(w, wall, d), Vector3(cx, wall * 0.5, cz), wall_col)
-	var pm := PrismMesh.new()
-	pm.size = Vector3(w + 0.3, roof, d + 0.3)
-	_mesh(pm, Vector3(cx, wall + roof * 0.5, cz), roof_col)
-	# Door and windows on the side facing the valley mouth.
-	var front := z + d + 0.03
-	_box(Vector3(0.8, 1.7, 0.06), Vector3(cx, 0.85, front), Color(0.4, 0.25, 0.15))
-	if w >= 3.0:
-		_box(Vector3(0.6, 0.6, 0.06), Vector3(x + 0.6, 1.9, front), Color(0.95, 0.85, 0.45))
-		_box(Vector3(0.6, 0.6, 0.06), Vector3(x + w - 0.6, 1.9, front), Color(0.95, 0.85, 0.45))
-	_box(Vector3(0.06, 0.6, 0.6), Vector3(x - 0.03, 1.9, cz), Color(0.95, 0.85, 0.45))
-	_box(Vector3(0.06, 0.6, 0.6), Vector3(x + w + 0.03, 1.9, cz), Color(0.95, 0.85, 0.45))
+func _model(file: String, pos: Vector3) -> Node3D:
+	var n := Models.instance(file)
+	n.position = pos
+	add_child(n)
+	return n
 
 
 func _build_shed() -> void:
@@ -970,6 +976,12 @@ func _build_shed() -> void:
 	shed = Shed.new()
 	add_child(shed)
 	shed.build(IceField.detail_texture(int(level.seed)))
+	# Woodpile, rain barrel, crates, lantern and stovepipe round the outside
+	# (art/blender/build_shed_props.py, in world coordinates).
+	_model("shed_props", Vector3.ZERO)
+	solids.append(AABB(Vector3(12.4, 0, 15.2), Vector3(2.6, 1.3, 0.75)))   # woodpile
+	solids.append(AABB(Vector3(8.9, 0, 15.4), Vector3(0.7, 0.85, 0.7)))    # barrel
+	solids.append(AABB(Vector3(7.8, 0, 8.5), Vector3(0.75, 1.1, 1.5)))     # crates
 
 
 func _build_trees() -> void:
@@ -1026,33 +1038,30 @@ func _build_flowers() -> void:
 				blocked = true
 		if blocked:
 			continue
-		var l := Label3D.new()
-		l.text = FLOWERS[rng.randi() % FLOWERS.size()]
-		l.font_size = 64
-		l.pixel_size = 0.0045
-		l.billboard = BaseMaterial3D.BILLBOARD_FIXED_Y
-		l.alpha_cut = Label3D.ALPHA_CUT_DISCARD
-		l.position = Vector3(x, 0.15, z)
+		var l := Models.baked_instance(Models.baked("nature", FLOWERS[rng.randi() % FLOWERS.size()]))
+		l.position = Vector3(x, 0.0, z)
+		l.rotation.y = rng.randf() * TAU
+		l.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 		l.visible = false
 		add_child(l)
 		_flowers.append({"node": l, "x": x, "z": z, "inside": inside, "threshold": rng.randf_range(0.05, 0.95)})
 
 
 func _build_villagers() -> void:
-	var spots := [Vector3(-7.5, 0.4, -16.6), Vector3(-2.5, 0.4, -18.3), Vector3(7.0, 0.4, -17.4),
-		Vector3(1.0, 0.4, -9.2), Vector3(-6.5, 0.4, -10.5), Vector3(4.5, 0.4, -10.8),
-		Vector3(3.2, 0.4, -19.0), Vector3(-0.8, 0.4, -20.5)]
+	## The villagers who come out to celebrate when the ice is gone
+	## (art/blender/build_characters.py). They hop on the spot, facing the valley.
+	var spots := [Vector3(-7.5, 0.0, -16.6), Vector3(-2.5, 0.0, -18.3), Vector3(7.0, 0.0, -17.4),
+		Vector3(1.0, 0.0, -9.2), Vector3(-6.5, 0.0, -10.5), Vector3(4.5, 0.0, -10.8),
+		Vector3(3.2, 0.0, -19.0), Vector3(-0.8, 0.0, -20.5)]
 	for i in VILLAGERS.size():
-		var l := Label3D.new()
-		l.text = VILLAGERS[i]
-		l.font_size = 128
-		l.pixel_size = 0.0065
-		l.billboard = BaseMaterial3D.BILLBOARD_FIXED_Y
-		l.alpha_cut = Label3D.ALPHA_CUT_DISCARD
-		l.position = spots[i]
-		l.visible = false
-		add_child(l)
-		_villagers.append(l)
-		var tw := l.create_tween().set_loops()
-		tw.tween_property(l, "position:y", 0.62, 0.35 + 0.05 * i).set_trans(Tween.TRANS_SINE)
-		tw.tween_property(l, "position:y", 0.4, 0.35 + 0.05 * i).set_trans(Tween.TRANS_SINE)
+		var v := Node3D.new()
+		var mi := Models.baked_instance(Models.baked("characters", VILLAGERS[i]))
+		v.add_child(mi)
+		v.position = spots[i]
+		v.rotation.y = PI + (float(i % 3) - 1.0) * 0.35   # face +Z, toward you, give or take
+		v.visible = false
+		add_child(v)
+		_villagers.append(v)
+		var tw := mi.create_tween().set_loops()
+		tw.tween_property(mi, "position:y", 0.22, 0.35 + 0.05 * i).set_trans(Tween.TRANS_SINE)
+		tw.tween_property(mi, "position:y", 0.0, 0.35 + 0.05 * i).set_trans(Tween.TRANS_SINE)

@@ -332,6 +332,7 @@ func _build_volcano() -> void:
 	label.font_size = 96
 	label.pixel_size = 0.03
 	label.outline_size = 18
+	UiTheme.sign_label(label)
 	label.billboard = BaseMaterial3D.BILLBOARD_ENABLED
 	label.position = Vector3(0, 17.5, 0)
 	_volcano.add_child(label)

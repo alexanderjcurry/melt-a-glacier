@@ -199,22 +199,9 @@ static func boulder_mesh(variant: int) -> ArrayMesh:
 
 
 static func pine_mesh(variant: int) -> ArrayMesh:
-	## A pine tree about 4 m tall: a trunk and five stacked cones.
-	var rng := RandomNumberGenerator.new()
-	rng.seed = 500 + variant
-	var st := MeshKit.begin()
-	MeshKit.cylinder(st, Vector3.ZERO, Vector3(0, 1.3, 0), 0.17, 0.1, Color(0.33, 0.22, 0.15), 6, false)
-	var green := Color(0.11, 0.27, 0.17).lerp(Color(0.17, 0.31, 0.14), rng.randf())
-	var layers := 5
-	for k in layers:
-		var t := float(k) / (layers - 1)
-		var y0 := 0.7 + k * 0.62
-		var r := lerpf(1.35, 0.42, t) * rng.randf_range(0.9, 1.1)
-		var h := lerpf(1.3, 1.0, t)
-		var lean := Vector3(rng.randf_range(-0.05, 0.05), 0.0, rng.randf_range(-0.05, 0.05))
-		MeshKit.cylinder(st, Vector3(0, y0, 0) + lean, Vector3(0, y0 + h, 0) + lean * 2.0, r, 0.0,
-				green.lightened(0.04 * k), 9, true)
-	return MeshKit.finish(st)
+	## A pine tree about 4 m tall, with drooping layers of branches
+	## (art/blender/build_nature.py).
+	return Models.baked("nature", "Pine%d" % (variant % 4))
 
 
 static func forest(spots: Array, shadows: bool) -> Node3D:
