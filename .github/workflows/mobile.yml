@@ -45,7 +45,7 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Read pinned versions
-        run: cat tools/plugin_versions.env >> "$GITHUB_ENV"
+        run: grep -E "^[A-Z_]+=" tools/plugin_versions.env >> "$GITHUB_ENV"
 
       - name: Set up Java 17
         uses: actions/setup-java@v4
