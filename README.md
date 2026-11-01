@@ -73,7 +73,7 @@ iOS comes later through Codemagic (Godot workflow). Nothing in the code is Andro
 | A fence across the valley keeps you off the lake. Its gate is locked until the village is free, then swings open. Your helpers retire and party in the village, and you hire a new crew for the lake at the same prices. Tools and upgrades carry over | `World._build_fence()`, `GameState.check_win()` |
 | First-person walking (CharacterBody3D on the ice's collision mesh), step-up, a jetpack (hold JUMP, fuel refills on landing) and a respawn button | `scripts/player.gd` |
 | The valley: generated mountains with rock and snow, a cloudy sky, the lake and a meltwater stream, pine forest, boulders | `scripts/scenery.gd`, `shaders/` |
-| The heat tool: aim with the crosshair, hold to melt a ball of ice. Each tool has its own spray (wavy hot air, a warm lamp glow, a blue torch flame, rolling fire, an arc of lava, a sunbeam from space), and upgrades show in it: Wider Nozzle makes it wider where it lands, Longer Reach makes it go further, Heat Output makes it brighter | `Player._update_tool()`, `scripts/tool_fx.gd`, `shaders/heat_beam.gdshader` |
+| The heat tool: aim with the crosshair, hold to melt a ball of ice. Each tool has its own 3D effect: rings of hot air in a warm haze, a cone of lamp light with dust glinting in it, a blue torch flame and jet, billowing fire with embers, a molten lava stream that drips and splashes, and a column of sunlight from space with shockwaves. Where it lands the ice steams, sparks or flurries. Upgrades show in it: Wider Nozzle makes it wider where it lands, Longer Reach makes it go further, Heat Output makes it brighter and denser | `Player._update_tool()`, `scripts/tool_fx.gd`, `shaders/tool_cone.gdshader`, `shaders/spark.gdshader` |
 | The shed is a walk-in store: tools hang on the pegboard, upgrades sit on the workbench, helpers wait in the hiring corner, finds go on the shelf by the door, and the catalogue on the table has the boost and purchases. Look at anything for a paper price card, then buy it where it stands | `scripts/shed.gd`, `Hud.set_shop_info()` |
 | 6 tools bought in order at the shed: Hair Dryer, Heat Lamp, Blowtorch, Flamethrower, Lava Hose, Orbital Mirror (the same models you hold) | `Balance.TOOLS`, `scripts/props.gd` |
 | 5 upgrades: Heat Output, Wider Nozzle, Longer Reach, Steam Sell, Crampon Boots | `Balance.UPGRADES` |
@@ -108,7 +108,7 @@ scripts/props.gd         models of the six tools and the upgrade items
 scripts/scenery.gd       mountains, sky, lake, stream, forest, boulders
 scripts/ice_field.gd     the glacier: density field, meshing, melting, collision, save string
 scripts/player.gd        first-person movement, jetpack, respawn, the heat tool
-scripts/tool_fx.gd       what comes out of each tool (spray, glow, splash), sized by your upgrades
+scripts/tool_fx.gd       what comes out of each tool (flames, beams, sparks, steam), sized by your upgrades
 scripts/creatures.gd     3D models of the helpers (penguin, sauna crew, Kevin)
 scripts/mesh_kit.gd      tiny modelling kit (ellipsoids, cylinders, boxes) for the models
 scripts/touch_controls.gd  phone controls (multi-touch stick, look, melt, jump)
@@ -119,7 +119,7 @@ scripts/shop_row.gd      one catalogue row
 scripts/ad_offers.gd     when the HUD's timed ad-offer tag shows up, and which reward it offers
 scripts/fmt.gd           1.23K / 4.5M number formatting
 scripts/monetization/    ad + IAP interface, stub provider, autoload facade
-shaders/                 ice, mountain rock and snow, sky, water, shed wood, the tools' heat beam
+shaders/                 ice, mountain rock and snow, sky, water, shed wood, the tools' flames and sparks
 fonts/                   subset Noto Color Emoji (the placeholder art) + license
 tests/smoke_test.gd      headless test: godot --headless -s res://tests/smoke_test.gd
 tests/screenshots.gd     renders screenshots of key moments (see the top of the file)
