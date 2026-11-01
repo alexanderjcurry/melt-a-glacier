@@ -371,7 +371,8 @@ func _place_finds() -> void:
 
 
 # How big each find is (its longest side, in metres), in Balance.DISCOVERIES order.
-const FIND_SIZES := [0.6, 0.8, 0.7, 1.6, 1.8, 0.7, 1.3, 1.1, 0.8, 0.9, 0.8]
+const FIND_SIZES := [0.6, 0.8, 0.7, 1.6, 1.8, 0.7, 1.3, 1.1, 0.8, 0.9, 0.8,
+	1.3, 2.6, 1.0, 5.0, 3.0, 2.6, 1.6]   # the lake glacier's finds: skater .. the sun's lost ray
 
 
 static func find_mesh(d: int) -> Mesh:
