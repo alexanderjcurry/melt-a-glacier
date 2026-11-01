@@ -1,9 +1,13 @@
 class_name Hud
 extends CanvasLayer
 ## Everything drawn over the 3D view: meltwater, glacier progress, crosshair,
-## phone controls, toasts, the shed menu, and popups. Built in code.
+## phone controls, toasts, the card for whatever you're looking at in the shed,
+## the catalogue, and popups. Built in code.
 
-const TABS = ["Tools", "Upgrades", "Helpers", "Finds", "Shop"]
+const PAPER := Color(0.97, 0.93, 0.83)
+const INK := Color(0.27, 0.16, 0.09)
+const INK_SOFT := Color(0.45, 0.34, 0.25)
+const BROWN := Color(0.45, 0.29, 0.17)
 
 signal respawn_requested
 
@@ -11,8 +15,7 @@ var player: Player
 var grid: IceField
 var touch: TouchControls
 var touch_mode := false
-var near_shed := false
-var shed_open := false
+var catalogue_open := false
 
 var root: Control
 var water_label: Label
@@ -23,7 +26,6 @@ var target_label: Label
 var tool_label: Label
 var boost_button: Button
 var boost_label: Label
-var shed_button: Button
 var respawn_button: Button
 var fuel_bar: ProgressBar
 var hint_label: Label
@@ -32,13 +34,16 @@ var crosshair: Crosshair
 var toast_box: VBoxContainer
 var popups: Control
 var rotate_overlay: Control
+var shop_card: PanelContainer      # what you're looking at in the shed, and its price
 
-var _shed: Control
+var _card_title: Label
+var _card_body: Label
+var _card_price: Label
+var _card_stamp: PanelContainer
+var _card_footer: Label
+var _catalogue: Control
 var _list_box: VBoxContainer
-var _scroll: ScrollContainer
-var _shed_water: Label
-var _tab := 0
-var _tab_buttons: Array = []
+var _cat_water: Label
 var _row_refreshers: Array = []
 var _refresh_timer := 0.0
 var _far_check_timer := 0.0
@@ -77,11 +82,11 @@ func _ready() -> void:
 	_build_top()
 	_build_center()
 	_build_bottom()
+	_build_shop_card()
 	touch = TouchControls.new()
 	root.add_child(touch)
 	# Tappable with any finger, even while the other thumb is on the stick.
 	touch.buttons = [
-		{"control": shed_button, "action": open_shed},
 		{"control": respawn_button, "action": _on_respawn_pressed},
 		{"control": boost_button, "action": _on_boost_pressed},
 	]
@@ -109,13 +114,13 @@ func _on_purchase_error(_id: String, reason: String) -> void:
 
 
 func _on_purchases_changed() -> void:
-	if shed_open:
-		_rebuild_list()
+	if catalogue_open:
+		_rebuild_catalogue()
 
 
 func set_coach(text: String) -> void:
 	## Onboarding hint above the crosshair ("" hides it).
-	var show := text != "" and not shed_open and popups.get_child_count() == 0
+	var show := text != "" and not catalogue_open and popups.get_child_count() == 0
 	coach_label.visible = show
 	if coach_label.text != text:
 		coach_label.text = text
@@ -123,7 +128,7 @@ func set_coach(text: String) -> void:
 
 func set_touch_mode(on: bool) -> void:
 	touch_mode = on
-	touch.visible = on and not shed_open
+	touch.visible = on and not catalogue_open
 	hint_label.visible = not on
 	# On phones the touch controls tap these (any finger works); the mouse
 	# version would also fire from the first finger, so it's switched off.
@@ -137,8 +142,8 @@ func _on_respawn_pressed() -> void:
 
 
 func is_blocking() -> bool:
-	## True while a menu or popup needs the mouse.
-	return shed_open or popups.get_child_count() > 0
+	## True while the catalogue or a popup needs the mouse.
+	return catalogue_open or popups.get_child_count() > 0
 
 
 # =====================================================================================
@@ -258,19 +263,6 @@ func _build_bottom() -> void:
 	tool_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	root.add_child(tool_label)
 
-	shed_button = Button.new()
-	shed_button.text = "🏠  Enter the shed"
-	shed_button.set_anchors_and_offsets_preset(Control.PRESET_CENTER_BOTTOM)
-	shed_button.offset_left = -170
-	shed_button.offset_right = 170
-	shed_button.offset_top = -140
-	shed_button.offset_bottom = -64
-	shed_button.add_theme_font_size_override("font_size", 28)
-	UiTheme.colored_button(shed_button, Color(0.55, 0.36, 0.2), 18)
-	shed_button.visible = false
-	shed_button.pressed.connect(open_shed)
-	root.add_child(shed_button)
-
 	fuel_bar = ProgressBar.new()
 	fuel_bar.show_percentage = false
 	fuel_bar.max_value = 1.0
@@ -292,7 +284,7 @@ func _build_bottom() -> void:
 	hint_label.offset_top = 80
 	hint_label.offset_bottom = 140
 	hint_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	hint_label.text = "Click to play\nWASD move · mouse look · hold left click to melt · Space jump (hold to fly)\nE shed · R respawn · Esc frees the mouse"
+	hint_label.text = "Click to play\nWASD move · mouse look · hold left click to melt · Space jump (hold to fly)\nWalk into the 🏠 shed to shop · R respawn · Esc frees the mouse"
 	root.add_child(hint_label)
 
 
@@ -320,12 +312,12 @@ func _process(delta: float) -> void:
 	if player == null:
 		return
 	var t: Dictionary = player.target
-	crosshair.hit = t.hit
-	crosshair.hot = player.melting
+	crosshair.hit = t.hit or shop_card.visible
+	crosshair.hot = player.melting and not shop_card.visible
 	crosshair.spin = fmod(crosshair.spin + delta * 7.0, TAU)
 	crosshair.far = _too_far and not t.hit
 	crosshair.queue_redraw()
-	fuel_bar.visible = not touch_mode and player.fuel < 0.999 and not shed_open
+	fuel_bar.visible = not touch_mode and player.fuel < 0.999 and not catalogue_open
 	fuel_bar.value = player.fuel
 	_far_check_timer += delta
 	if _far_check_timer >= 0.2:
@@ -350,7 +342,9 @@ func _refresh() -> void:
 	else:
 		ice_label.text = "Glacier melted: %d%%  ·  %s m³ of ice left" % [int(floor((1.0 - left) * 100.0)), Fmt.num(grid.volume_left())]
 	var t: Dictionary = player.target
-	if t.hit:
+	if shop_card.visible:
+		target_label.text = ""
+	elif t.hit:
 		var l := grid.layer_at(t.pos - t.normal * 0.3)
 		target_label.text = "%s  ·  💧%s per m³" % [Balance.LAYERS[l].name, Fmt.num(GameState.block_value(l))]
 	elif _too_far:
@@ -363,12 +357,11 @@ func _refresh() -> void:
 		boost_label.text = "🔥 2x " + Fmt.duration(GameState.boost_seconds_left())
 	else:
 		boost_label.text = ""
-	shed_button.visible = near_shed and not shed_open and popups.get_child_count() == 0
-	respawn_button.visible = not shed_open and popups.get_child_count() == 0
-	hint_label.visible = not touch_mode and not shed_open and popups.get_child_count() == 0 \
+	respawn_button.visible = not catalogue_open and popups.get_child_count() == 0
+	hint_label.visible = not touch_mode and not catalogue_open and popups.get_child_count() == 0 \
 		and Input.mouse_mode != Input.MOUSE_MODE_CAPTURED
-	if shed_open:
-		_shed_water.text = "💧 " + Fmt.num(GameState.water)
+	if catalogue_open:
+		_cat_water.text = "You have 💧 " + Fmt.num(GameState.water)
 		for r in _row_refreshers:
 			r.call()
 
@@ -399,8 +392,6 @@ func toast(text: String) -> void:
 func _on_discovered(i: int, value: float) -> void:
 	var d: Dictionary = Balance.DISCOVERIES[i]
 	toast("%s %s melted out! Sold for 💧%s" % [d.icon, d.name, Fmt.num(value)])
-	if shed_open and _tab == 3:
-		_rebuild_list()
 
 
 func _on_boost_pressed() -> void:
@@ -413,33 +404,139 @@ func _on_boost_pressed() -> void:
 
 
 # =====================================================================================
-# The shed
+# The shed: a card for whatever you're looking at, and the catalogue
 # =====================================================================================
-func open_shed() -> void:
-	if shed_open:
+func _paper(bg: Color, border: int, radius: int, margin: int) -> StyleBoxFlat:
+	var sb := UiTheme.flat(bg, radius, margin)
+	sb.border_color = BROWN
+	sb.set_border_width_all(border)
+	sb.shadow_color = Color(0, 0, 0, 0.3)
+	sb.shadow_size = 6
+	sb.shadow_offset = Vector2(0, 3)
+	return sb
+
+
+func _ink(size: int, color: Color = INK) -> Label:
+	var l := Label.new()
+	l.add_theme_font_size_override("font_size", size)
+	l.add_theme_color_override("font_color", color)
+	l.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	return l
+
+
+func _build_shop_card() -> void:
+	## A paper price tag at the bottom of the screen: name, what it does, price.
+	shop_card = PanelContainer.new()
+	shop_card.add_theme_stylebox_override("panel", _paper(PAPER, 3, 10, 16))
+	shop_card.anchor_left = 0.5
+	shop_card.anchor_right = 0.5
+	shop_card.anchor_top = 1.0
+	shop_card.anchor_bottom = 1.0
+	shop_card.offset_left = -340
+	shop_card.offset_right = 340
+	shop_card.offset_top = -14
+	shop_card.offset_bottom = -14
+	shop_card.grow_vertical = Control.GROW_DIRECTION_BEGIN
+	shop_card.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	shop_card.visible = false
+	root.add_child(shop_card)
+	var v := VBoxContainer.new()
+	v.add_theme_constant_override("separation", 4)
+	v.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	shop_card.add_child(v)
+	var head := HBoxContainer.new()
+	head.add_theme_constant_override("separation", 12)
+	head.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	v.add_child(head)
+	_card_title = _ink(29)
+	_card_title.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	_card_title.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	head.add_child(_card_title)
+	_card_stamp = PanelContainer.new()
+	_card_stamp.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_card_stamp.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	head.add_child(_card_stamp)
+	_card_price = _ink(26, Color.WHITE)
+	_card_stamp.add_child(_card_price)
+	_card_body = _ink(21, INK_SOFT)
+	_card_body.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	_card_body.custom_minimum_size = Vector2(640, 0)
+	v.add_child(_card_body)
+	_card_footer = _ink(18, BROWN)
+	_card_footer.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
+	v.add_child(_card_footer)
+
+
+func set_shop_info(info: Dictionary) -> void:
+	## The world calls this every frame with what the crosshair is on in the
+	## shed (see Shed.describe), or {} for nothing.
+	var show := not info.is_empty() and not is_blocking()
+	if shop_card.visible != show:
+		shop_card.visible = show
+		tool_label.visible = not show
+	if not show:
+		touch.set_action("", "", false)
 		return
-	shed_open = true
-	GameState.tutorial_step = maxi(GameState.tutorial_step, 3)
+	var title: String = info.title
+	var body: String = info.body
+	var price: String = info.price
+	var action: String = info.action
+	var can: bool = info.can
+	if _card_title.text != title:
+		_card_title.text = title
+	if _card_body.text != body:
+		_card_body.text = body
+	_card_stamp.visible = price != ""
+	if _card_price.text != price:
+		_card_price.text = price
+	var buying := action == "BUY" or action == "HIRE"
+	var stamp := Color(0.5, 0.47, 0.42)
+	if can:
+		stamp = Color(0.2, 0.52, 0.27)
+	elif buying:
+		stamp = Color(0.66, 0.3, 0.2)
+	elif action == "OWNED" or action == "IN USE" or action == "MAXED":
+		stamp = Color(0.33, 0.5, 0.37)
+	_card_stamp.add_theme_stylebox_override("panel", UiTheme.flat(stamp, 8, 10))
+	var foot := ""
+	if buying and not can:
+		foot = "Not enough 💧 yet"
+	elif can and not touch_mode:
+		foot = "Click (or press E) to %s" % action.to_lower()
+	_card_footer.visible = foot != ""
+	if _card_footer.text != foot:
+		_card_footer.text = foot
+	touch.set_action(action, price if buying else "", can)
+
+
+func open_catalogue() -> void:
+	## The mail-order catalogue on the table by the shed door: the boost, the
+	## purchases, and in playtest builds the developer tools.
+	if catalogue_open:
+		return
+	catalogue_open = true
+	shop_card.visible = false
+	tool_label.visible = true
 	coach_label.visible = false
 	Input.mouse_mode = Input.MOUSE_MODE_VISIBLE
 	player.input_enabled = false
 	touch.release_all()
 	touch.visible = false
-	_shed = ColorRect.new()
-	(_shed as ColorRect).color = Color(0.02, 0.04, 0.1, 0.7)
-	_shed.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
-	_shed.mouse_filter = Control.MOUSE_FILTER_STOP
-	root.add_child(_shed)
-	root.move_child(_shed, popups.get_index())   # popups stay on top
+	_catalogue = ColorRect.new()
+	(_catalogue as ColorRect).color = Color(0.05, 0.03, 0.02, 0.55)
+	_catalogue.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	_catalogue.mouse_filter = Control.MOUSE_FILTER_STOP
+	root.add_child(_catalogue)
+	root.move_child(_catalogue, popups.get_index())   # popups stay on top
 
 	var panel := PanelContainer.new()
 	panel.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
-	panel.offset_left = 40
-	panel.offset_right = -40
-	panel.offset_top = 24
-	panel.offset_bottom = -24
-	panel.add_theme_stylebox_override("panel", UiTheme.flat(Color(0.1, 0.13, 0.22), 22, 20))
-	_shed.add_child(panel)
+	panel.offset_left = 70
+	panel.offset_right = -70
+	panel.offset_top = 26
+	panel.offset_bottom = -26
+	panel.add_theme_stylebox_override("panel", _paper(PAPER, 5, 12, 22))
+	_catalogue.add_child(panel)
 	var v := VBoxContainer.new()
 	v.add_theme_constant_override("separation", 10)
 	panel.add_child(v)
@@ -447,173 +544,76 @@ func open_shed() -> void:
 	var head := HBoxContainer.new()
 	head.add_theme_constant_override("separation", 16)
 	v.add_child(head)
-	var title := Label.new()
-	title.text = "🏠 The Shed"
-	title.add_theme_font_size_override("font_size", 34)
-	head.add_child(title)
-	_shed_water = Label.new()
-	_shed_water.add_theme_font_size_override("font_size", 30)
-	_shed_water.add_theme_color_override("font_color", Color(0.7, 0.9, 1.0))
-	_shed_water.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	_shed_water.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	head.add_child(_shed_water)
+	var titles := VBoxContainer.new()
+	titles.add_theme_constant_override("separation", 0)
+	titles.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	head.add_child(titles)
+	var title := _ink(38)
+	title.text = "📖 The Catalogue"
+	titles.add_child(title)
+	var sub := _ink(19, INK_SOFT)
+	sub.text = "Mail-order goods for the serious glacier melter"
+	titles.add_child(sub)
+	_cat_water = _ink(26)
+	_cat_water.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	head.add_child(_cat_water)
 	var close := Button.new()
-	close.text = "Back to the glacier"
-	close.custom_minimum_size = Vector2(260, 58)
-	UiTheme.colored_button(close, Color(0.3, 0.36, 0.5))
-	close.pressed.connect(close_shed)
+	close.text = "Close"
+	close.custom_minimum_size = Vector2(170, 60)
+	UiTheme.colored_button(close, BROWN)
+	close.pressed.connect(close_catalogue)
 	head.add_child(close)
+	var rule := ColorRect.new()
+	rule.color = BROWN
+	rule.custom_minimum_size = Vector2(0, 3)
+	v.add_child(rule)
 
-	var tabs := HBoxContainer.new()
-	tabs.add_theme_constant_override("separation", 4)
-	v.add_child(tabs)
-	var group := ButtonGroup.new()
-	_tab_buttons = []
-	for i in TABS.size():
-		var b := Button.new()
-		b.text = TABS[i]
-		b.toggle_mode = true
-		b.button_group = group
-		b.custom_minimum_size = Vector2(0, 56)
-		b.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-		b.add_theme_stylebox_override("normal", UiTheme.flat(Color(0.16, 0.22, 0.36), 12))
-		b.add_theme_stylebox_override("hover", UiTheme.flat(Color(0.2, 0.28, 0.44), 12))
-		b.add_theme_stylebox_override("pressed", UiTheme.flat(Color(0.28, 0.45, 0.75), 12))
-		b.pressed.connect(_select_tab.bind(i))
-		tabs.add_child(b)
-		_tab_buttons.append(b)
-
-	_scroll = ScrollContainer.new()
-	_scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
-	_scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
-	v.add_child(_scroll)
+	var scroll := ScrollContainer.new()
+	scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
+	scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	v.add_child(scroll)
 	_list_box = VBoxContainer.new()
 	_list_box.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	_list_box.add_theme_constant_override("separation", 8)
-	_scroll.add_child(_list_box)
-	_select_tab(_tab)
+	scroll.add_child(_list_box)
+	_rebuild_catalogue()
 	_refresh()
 
 
-func close_shed() -> void:
-	if not shed_open:
+func close_catalogue() -> void:
+	if not catalogue_open:
 		return
-	shed_open = false
+	catalogue_open = false
 	_row_refreshers.clear()
-	if _shed != null:
-		_shed.queue_free()
-		_shed = null
-	player.input_enabled = true
-	touch.visible = touch_mode
+	if _catalogue != null:
+		_catalogue.queue_free()
+		_catalogue = null
+		_list_box = null
+	if popups.get_child_count() == 0:
+		player.input_enabled = true
+		touch.visible = touch_mode
 	GameState.save_game()
-	Monetization.maybe_show_interstitial("shed_exit")
 
 
-func _select_tab(i: int) -> void:
-	_tab = i
-	_tab_buttons[i].button_pressed = true
-	_rebuild_list()
-	_scroll.scroll_vertical = 0
-
-
-func _rebuild_list() -> void:
-	if _list_box == null or not shed_open:
+func _rebuild_catalogue() -> void:
+	if _list_box == null or not catalogue_open:
 		return
 	for c in _list_box.get_children():
 		c.queue_free()
 	_row_refreshers.clear()
-	match _tab:
-		0: _build_tools()
-		1: _build_upgrades()
-		2: _build_helpers()
-		3: _build_finds()
-		4: _build_shop()
+	_build_catalogue_rows()
 	for r in _row_refreshers:
 		r.call()
 
 
 func _row(icon: String, title: String, desc: String) -> ShopRow:
 	var row := ShopRow.new()
-	row.setup(icon, title, desc)
+	row.setup(icon, title, desc, true)
 	_list_box.add_child(row)
 	return row
 
 
-func _build_tools() -> void:
-	for i in Balance.TOOLS.size():
-		var t: Dictionary = Balance.TOOLS[i]
-		var row := _row(t.icon, t.name, "")
-		var stats := "%s  ·  power %s, zone %.1f m, reach %.1f m" % [t.desc, Fmt.num(t.power), t.radius, t.range]
-		_row_refreshers.append(func():
-			row.set_desc(stats)
-			if i < GameState.tool_index:
-				row.set_button("Owned ✔️", false)
-			elif i == GameState.tool_index:
-				row.set_button("Equipped", false)
-			elif i == GameState.next_tool_index():
-				row.set_button("💧 " + Fmt.num(t.cost), GameState.water >= t.cost)
-			else:
-				row.set_desc("Buy the previous tool first")
-				row.set_button("🔒 " + Fmt.num(t.cost), false))
-		row.button.pressed.connect(func():
-			if GameState.buy_tool(i):
-				toast("%s %s equipped!" % [t.icon, t.name]))
-
-
-func _build_upgrades() -> void:
-	for u in Balance.UPGRADES:
-		var key: String = u.key
-		var row := _row(u.icon, u.name, "")
-		_row_refreshers.append(func():
-			var lvl := int(GameState.upgrade_levels[key])
-			row.set_title("%s  (Lv %d/%d)" % [u.name, lvl, int(u.max)])
-			row.set_desc("%s  ·  now x%.2f" % [u.desc, GameState.upgrade_mult(key)])
-			if GameState.upgrade_maxed(key):
-				row.set_button("Maxed ✔️", false)
-			else:
-				var cost := GameState.upgrade_cost(key)
-				row.set_button("💧 " + Fmt.num(cost), GameState.water >= cost))
-		row.button.pressed.connect(func(): GameState.buy_upgrade(key))
-
-
-func _build_helpers() -> void:
-	for i in Balance.HELPERS.size():
-		var h: Dictionary = Balance.HELPERS[i]
-		var row := _row(h.icon, h.name, "")
-		_row_refreshers.append(func():
-			row.set_title("%s  x%d" % [h.name, int(GameState.helper_counts[i])])
-			row.set_desc("%s  ·  %s hp/s each" % [h.desc, Fmt.num(float(h.power) * GameState.global_mult())])
-			var cost := GameState.helper_cost(i)
-			row.set_button("💧 " + Fmt.num(cost), GameState.water >= cost))
-		row.button.pressed.connect(func():
-			if GameState.buy_helper(i):
-				toast("%s %s hired!" % [h.icon, h.name]))
-
-
-func _build_finds() -> void:
-	var found := 0
-	for d in GameState.discovered:
-		if d:
-			found += 1
-	var header := Label.new()
-	header.text = "Collection: %d / %d found  (+ the village at the very bottom)" % [found, Balance.DISCOVERIES.size()]
-	header.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	_list_box.add_child(header)
-	for i in Balance.DISCOVERIES.size():
-		var d: Dictionary = Balance.DISCOVERIES[i]
-		var row: ShopRow
-		if GameState.discovered[i]:
-			row = _row(d.icon, d.name, d.flavor)
-			row.set_button("Found ✔️", false)
-		else:
-			row = _row("❓", "???", "Frozen somewhere in the %s" % Balance.LAYERS[int(d.layer)].name)
-			row.set_button("Frozen", false)
-	var village := _row("🏘️", "The Village" if GameState.has_won else "???",
-		"Free at last! Summer is back." if GameState.has_won else "Something big is under all that ice")
-	village.set_button("Found ✔️" if GameState.has_won else "Frozen", false)
-
-
-func _build_shop() -> void:
+func _build_catalogue_rows() -> void:
 	var boost := _row("📺", "2x Heat Boost", "Watch an ad: everything melts 2x faster for 5 min. Stacks to 15 min.")
 	boost.set_button("Watch", true)
 	boost.button.pressed.connect(_on_boost_pressed)
@@ -643,10 +643,9 @@ func _build_shop() -> void:
 	# Dev tools: in the editor, and in exports tagged "playtest" (the web build).
 	# Remove the tag from export_presets.cfg before shipping.
 	if OS.is_debug_build() or OS.has_feature("playtest"):
-		var title := Label.new()
+		var title := _ink(22, Color(0.7, 0.2, 0.15))
 		title.text = "Developer tools (playtest builds only)"
 		title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-		title.add_theme_color_override("font_color", Color(1, 0.6, 0.6))
 		_list_box.add_child(title)
 		var cash := _row("💰", "Free meltwater", "Adds 10x your current water (at least 1K).")
 		cash.set_button("Add", true)
@@ -663,7 +662,7 @@ func _build_shop() -> void:
 		var melt := _row("☀️", "Melt everything", "Skip straight to the ending.")
 		melt.set_button("Melt", true)
 		melt.button.pressed.connect(func():
-			close_shed()
+			close_catalogue()
 			grid.melt_everything())
 		var wipe := _row("🗑️", "Start over", "New glacier, keeps purchases.")
 		wipe.set_button("Wipe", true)
@@ -723,7 +722,7 @@ func _close_popup(p: Dictionary) -> void:
 	var r: Control = p.root
 	popups.remove_child(r)
 	r.queue_free()
-	if popups.get_child_count() == 0 and not shed_open:
+	if popups.get_child_count() == 0 and not catalogue_open:
 		player.input_enabled = true
 		touch.visible = touch_mode
 
@@ -748,8 +747,8 @@ func show_ending() -> void:
 	if _ending_shown:
 		return
 	_ending_shown = true
-	if shed_open:
-		close_shed()
+	if catalogue_open:
+		close_catalogue()
 	var found := 0
 	for d in GameState.discovered:
 		if d:

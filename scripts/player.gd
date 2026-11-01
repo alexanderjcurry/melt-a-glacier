@@ -362,65 +362,12 @@ func _update_tool(delta: float) -> void:
 
 
 func _build_tool_model() -> void:
+	## The tool in your hand: the same model that hangs on the shed's tool wall.
 	_shown_tool = GameState.tool_index
 	_shown_gold = GameState.golden_equipped
 	if _tool_model != null:
 		_tool_model.queue_free()
-	_tool_model = Node3D.new()
-	_tool_model.scale = Vector3.ONE * (0.6 + 0.04 * float(_shown_tool))   # better tools are a bit chunkier
-	_tool_holder.add_child(_tool_model)
-	var t: Dictionary = GameState.tool_def()
-	var col: Color = Color(1.0, 0.8, 0.25) if (_shown_gold and _shown_tool == 0) else t.color
-	var tier := float(_shown_tool)
-	# Barrel pointing forward (a cylinder's +Y turned to -Z).
-	var barrel := _part(_cyl(0.052 + 0.004 * tier, 0.066 + 0.004 * tier, 0.26), col)
-	barrel.rotation.x = -PI / 2.0
-	barrel.position = Vector3(0, 0, -0.03)
-	var back := _part(_cyl(0.07, 0.07, 0.04), col.darkened(0.25))
-	back.rotation.x = -PI / 2.0
-	back.position = Vector3(0, 0, 0.11)
-	var grille := _part(_cyl(0.055, 0.055, 0.01), Color(0.15, 0.15, 0.18))
-	grille.rotation.x = -PI / 2.0
-	grille.position = Vector3(0, 0, 0.133)
-	var handle := _part(_box(Vector3(0.05, 0.18, 0.065)), col.darkened(0.35))
-	handle.position = Vector3(0, -0.11, 0.05)
-	handle.rotation.x = 0.28
-	var nozzle := _part(_cyl(0.028 + 0.01 * tier, 0.042 + 0.008 * tier, 0.1), Color(0.22, 0.22, 0.26))
-	nozzle.rotation.x = -PI / 2.0
-	nozzle.position = Vector3(0, 0, -0.2)
-	if _shown_tool == Balance.TOOLS.size() - 1:
-		# The orbital mirror "remote": a dish on top.
-		var dish := _part(_cyl(0.12, 0.02, 0.05), Color(0.9, 0.92, 1.0))
-		dish.position = Vector3(0, 0.1, 0.02)
-
-
-func _part(mesh: Mesh, c: Color) -> MeshInstance3D:
-	var mi := MeshInstance3D.new()
-	mi.mesh = mesh
-	mi.material_override = _solid(c)
-	mi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
-	_tool_model.add_child(mi)
-	return mi
-
-
-func _cyl(top: float, bottom: float, height: float) -> CylinderMesh:
-	var m := CylinderMesh.new()
-	m.top_radius = top
-	m.bottom_radius = bottom
-	m.height = height
-	m.radial_segments = 16
-	m.rings = 1
-	return m
-
-
-func _box(size: Vector3) -> BoxMesh:
-	var m := BoxMesh.new()
-	m.size = size
-	return m
-
-
-func _solid(c: Color) -> StandardMaterial3D:
-	var m := StandardMaterial3D.new()
-	m.albedo_color = c
-	m.roughness = 0.5
-	return m
+	var mi := Props.instance(Props.tool_mesh(_shown_tool, _shown_gold and _shown_tool == 0))
+	mi.scale = Vector3.ONE * (0.6 + 0.04 * float(_shown_tool))   # better tools are a bit chunkier
+	_tool_model = mi
+	_tool_holder.add_child(mi)

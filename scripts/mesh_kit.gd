@@ -58,8 +58,9 @@ static func ellipsoid(st: SurfaceTool, center: Vector3, radii: Vector3, color: C
 
 
 static func cylinder(st: SurfaceTool, from: Vector3, to: Vector3, r_from: float, r_to: float, color: Color,
-		segs: int = 12, caps: bool = true) -> void:
+		segs: int = 12, caps: bool = true, inside: bool = false) -> void:
 	## A (possibly tapered) tube from `from` to `to`. r_to = 0 makes a cone.
+	## `inside` turns it inside out: the inner wall of a cup, a lamp shade or a nozzle.
 	var axis := to - from
 	var up := axis.normalized()
 	var side := up.cross(Vector3.FORWARD if absf(up.dot(Vector3.FORWARD)) < 0.9 else Vector3.RIGHT).normalized()
@@ -71,6 +72,8 @@ static func cylinder(st: SurfaceTool, from: Vector3, to: Vector3, r_from: float,
 		var th := TAU * float(sgm) / segs
 		var dir := side * cos(th) + side2 * sin(th)
 		var n := (dir + up * slope).normalized()
+		if inside:
+			n = -n
 		ring_a.append([from + dir * r_from, n])
 		ring_b.append([to + dir * r_to, n])
 	for sgm in segs:
@@ -105,6 +108,11 @@ static func box(st: SurfaceTool, center: Vector3, size: Vector3, color: Color, b
 		var p3 := center + basis * (c + du - dv)
 		_tri(st, [p0, nn], [p1, nn], [p2, nn], color)
 		_tri(st, [p0, nn], [p2, nn], [p3, nn], color)
+
+
+static func triangle(st: SurfaceTool, a: Vector3, b: Vector3, c: Vector3, normal: Vector3, color: Color) -> void:
+	## A flat triangle facing `normal`.
+	_tri(st, [a, normal], [b, normal], [c, normal], color)
 
 
 static func _tri(st: SurfaceTool, a: Array, b: Array, c: Array, color: Color) -> void:

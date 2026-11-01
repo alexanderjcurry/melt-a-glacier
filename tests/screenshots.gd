@@ -121,19 +121,42 @@ func _run() -> void:
 	await _frames(3)
 	await _shot("04d_kevin")
 
-	# The shed.
-	player.position = Vector3(5.5, 0.0, 11.5)
+	# The shed, from the path, and its door.
+	var shed = world.shed
+	player.position = Vector3(3.0, 0.0, 17.0)
 	player.unstick()
-	_aim_at(player, Vector3(9.5, 1.5, 11.5))
+	_aim_at(player, Vector3(12.0, 2.0, 11.0))
 	await _frames(5)
-	await _shot("05_shed_door")
-	hud.open_shed()
+	await _shot("05_shed_outside")
+	player.position = Vector3(5.6, 0.0, 11.5)
+	_aim_at(player, Vector3(9.0, 1.7, 11.5))
 	await _frames(5)
-	await _shot("06_shed_menu")
-	hud._select_tab(2)
-	await _frames(5)
-	await _shot("07_shed_helpers")
-	hud.close_shed()
+	await _shot("05b_shed_door")
+	# Inside: the tool wall (looking at the next tool), the bench, the hiring
+	# corner, the finds shelf by the door, and the catalogue.
+	var views := [
+		["06_shed_tools", Vector3(12.3, 0.0, 11.6), shed.item("tool", 1).node.global_position],
+		["06b_shed_tools_wide", Vector3(13.0, 0.0, 13.8), Vector3(13.2, 1.6, 8.0)],
+		["07_shed_upgrades", Vector3(12.0, 0.0, 12.2), shed.item("upgrade", "heat").node.global_position + Vector3(0, 0.3, 0)],
+		["07b_shed_helpers", Vector3(13.6, 0.0, 11.0), shed.item("helper", 0).node.global_position + Vector3(0, 0.5, 0)],
+		["07c_shed_door_side", Vector3(15.5, 0.0, 12.6), Vector3(9.0, 1.3, 11.0)],
+		["07d_shed_finds", Vector3(11.2, 0.0, 9.6), shed.item("find", 4).node.global_position],
+	]
+	for v in views:
+		player.position = v[1]
+		player.velocity = Vector3.ZERO
+		_aim_at(player, v[2])
+		await _frames(6)
+		await _shot(v[0])
+	player.position = Vector3(10.7, 0.0, 13.4)
+	_aim_at(player, shed.item("catalogue", 0).node.global_position)
+	await _frames(4)
+	await _shot("07e_shed_catalogue_card")
+	world.use_aimed()
+	await _frames(4)
+	await _shot("07f_catalogue")
+	hud.close_catalogue()
+	player.input_enabled = true
 
 	# Halfway: melt the top half of the glacier.
 	for i in grid.f.size():

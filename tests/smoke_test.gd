@@ -164,17 +164,80 @@ func _run() -> void:
 		player._move(1.0 / 60.0)
 	check(player.on_floor and player.fuel > 0.99, "landing refills the fuel")
 
-	# --- The shed: buy a tool, an upgrade and a helper; every tab builds.
+	# --- The shed: walk in through the door, look at things and buy them.
 	gs.grant_water(1e6)
-	check(gs.buy_tool(1) and gs.tool_index == 1, "bought the Heat Lamp")
-	check(gs.buy_upgrade("heat"), "bought Heat Output")
-	check(gs.buy_helper(0) and gs.helper_counts[0] == 1, "hired a penguin")
-	world.hud.open_shed()
-	for t in world.hud.TABS.size():
-		world.hud._select_tab(t)
-		await _frames(1)
-	world.hud.close_shed()
+	var shed = world.shed
+	var hud = world.hud
+	player.respawn(Vector3(7.0, 0.0, 9.0), -PI / 2.0)   # outside the west wall, facing it
+	player.move_input = Vector2(0, 1)
+	for _i in 90:
+		player._move(1.0 / 60.0)
+	check(player.position.x < 8.6, "the shed's walls are solid (stopped at x=%.2f)" % player.position.x)
+	player.respawn(Vector3(6.5, 0.0, 11.5), -PI / 2.0)  # in front of the door
+	for _i in 60:
+		player._move(1.0 / 60.0)
+	player.move_input = Vector2.ZERO
+	check(shed.contains(player.position) and not player.collides(player.position + Vector3(0, 0.05, 0)),
+		"walked in through the shed door (at %s)" % player.position)
 	await _frames(2)
+	check(world._in_shed and not shed.marker.visible, "the game knows you're in the shed")
+	# Look at the Heat Lamp on the tool wall and tap BUY.
+	hud.set_touch_mode(true)
+	var lamp = shed.item("tool", 1)
+	player.position = Vector3(11.6, 0.0, 10.8)
+	_aim_at(player, lamp.node.global_position)
+	await _frames(2)
+	check(int(world._aimed.get("index", -1)) == lamp.index and hud.shop_card.visible
+		and hud._card_title.text.contains("Heat Lamp"), "looking at the Heat Lamp shows its card (%s)" % hud._card_title.text)
+	check(touch.action_text == "BUY" and touch.action_ok, "the 🔥 button turned into BUY (%s %s)" % [touch.action_text, touch.action_sub])
+	_touch(0, touch.melt_center(), true)
+	_touch(0, touch.melt_center(), false)
+	await _frames(2)
+	check(gs.tool_index == 1 and not player.melting, "tapping BUY bought the Heat Lamp")
+	check(not lamp.node.visible and touch.action_text == "IN USE", "it's off the wall and in your hands (%s)" % touch.action_text)
+	var dryer = shed.item("tool", 0)
+	check(dryer.node.visible and dryer.price.text.contains("Owned"), "the hair dryer hangs on the wall as owned")
+	hud.set_touch_mode(false)
+	# An upgrade from the bench, with the E key.
+	var thermo = shed.item("upgrade", "heat")
+	player.position = Vector3(10.6, 0.0, 13.0)
+	_aim_at(player, thermo.node.global_position + Vector3(0, 0.25, 0))
+	await _frames(2)
+	var key := InputEventKey.new()
+	key.physical_keycode = KEY_E
+	key.pressed = true
+	root.push_input(key)
+	await _frames(1)
+	check(int(gs.upgrade_levels["heat"]) == 1, "bought Heat Output at the bench (%s)" % hud._card_title.text)
+	# Hire a penguin in the corner.
+	var peng = shed.item("helper", 0)
+	player.position = Vector3(14.8, 0.0, 9.6)
+	_aim_at(player, peng.node.global_position + Vector3(0, 0.4, 0))
+	await _frames(2)
+	world.use_aimed()
+	check(gs.helper_counts[0] == 1, "hired a penguin in the hiring corner")
+	# The finds shelf shows what's still frozen.
+	var mitten = shed.item("find", 0)
+	player.position = Vector3(10.8, 0.0, 8.9)
+	_aim_at(player, mitten.node.global_position)
+	await _frames(2)
+	check(int(world._aimed.get("index", -1)) == mitten.index and hud._card_title.text.contains("frozen")
+		and shed._ice_cubes[0].visible, "the finds shelf: the mitten is still in its ice cube")
+	# The catalogue opens and closes.
+	var book = shed.item("catalogue", 0)
+	player.position = Vector3(10.7, 0.0, 13.4)
+	_aim_at(player, book.node.global_position)
+	await _frames(2)
+	world.use_aimed()
+	await _frames(1)
+	check(hud.catalogue_open and hud._list_box.get_child_count() >= 4 and not player.input_enabled, "the catalogue opens")
+	root.push_input(key)
+	await _frames(1)
+	check(not hud.catalogue_open and player.input_enabled, "and closes again")
+	# Walk back out.
+	player.position = Vector3(6.5, 0.0, 11.5)
+	await _frames(2)
+	check(not world._in_shed and shed.marker.visible and not hud.shop_card.visible, "walked back out")
 	check(world.helpers._walkers.size() == 1, "the penguin is out on the ice")
 
 	# --- The helpers walk on top of the ice (give them a second of game time).

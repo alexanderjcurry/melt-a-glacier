@@ -4,6 +4,8 @@ extends Control
 ## left side = floating joystick, right side = drag to look,
 ## MELT button = hold to melt (dragging from it also turns the view),
 ## JUMP button = tap to jump, keep holding to fly with the jetpack.
+## In the shed, while you look at something for sale, the MELT button turns
+## into a BUY (or HIRE, OPEN...) button: see set_action().
 ## Godot's Buttons only see the first finger, so all of this reads raw touches,
 ## and on-screen buttons registered in `buttons` are tapped from here too.
 ##
@@ -27,6 +29,9 @@ var look_delta := Vector2.ZERO        # pixels dragged since the last read
 var fuel := 1.0                       # jetpack fuel 0..1, drawn around the JUMP button
 var buttons: Array = []               # [{control, action}] on-screen buttons any finger can tap
 var exclusions: Array[Control] = []   # other controls the touch controls must leave alone
+var action_text := ""                 # set: the melt button is a shop button with this word on it
+var action_sub := ""                  # a smaller line under it (the price)
+var action_ok := false                # green when pressing it does something
 
 var _stick_finger := -1
 var _stick_origin := Vector2.ZERO
@@ -35,6 +40,7 @@ var _look_finger := -1
 var _melt_finger := -1
 var _jump_finger := -1
 var _jump_queued := false
+var _action_queued := false
 var _last := {}                       # finger index -> last position
 var _travel := {}                     # finger index -> distance moved since it touched down
 
@@ -68,6 +74,21 @@ func take_jump() -> bool:
 	return j
 
 
+func set_action(text: String, sub: String, ok: bool) -> void:
+	if text != action_text or sub != action_sub or ok != action_ok:
+		action_text = text
+		action_sub = sub
+		action_ok = ok
+		queue_redraw()
+
+
+func take_action() -> bool:
+	## True once after the shop button was tapped.
+	var a := _action_queued
+	_action_queued = false
+	return a
+
+
 func release_all() -> void:
 	_stick_finger = -1
 	_look_finger = -1
@@ -79,6 +100,7 @@ func release_all() -> void:
 	melting = false
 	jump_held = false
 	look_delta = Vector2.ZERO
+	_action_queued = false
 	queue_redraw()
 
 
@@ -126,7 +148,10 @@ func _on_touch(event: InputEventScreenTouch) -> void:
 	if pos.distance_to(melt_center()) <= MELT_RADIUS + 25.0:
 		_release(_melt_finger)
 		_melt_finger = i
-		melting = true
+		if action_text != "":
+			_action_queued = true   # a tap on BUY; the finger can still drag to look
+		else:
+			melting = true
 	elif pos.distance_to(jump_center()) <= JUMP_RADIUS + 25.0:
 		_release(_jump_finger)
 		_jump_finger = i
@@ -218,13 +243,22 @@ func _draw() -> void:
 	draw_circle(knob, 34.0, Color(1, 1, 1, a + 0.15))
 	if _stick_finger == -1:
 		_label(font, "MOVE", base + Vector2(0, STICK_RADIUS + 26), 20, Color(1, 1, 1, 0.55))
-	# Melt button
+	# Melt button (or the shop button in the shed)
 	var mc := melt_center()
-	var hot := Color(1.0, 0.45, 0.12, 0.9 if melting else 0.6)
-	draw_circle(mc, MELT_RADIUS, hot)
-	draw_arc(mc, MELT_RADIUS, 0, TAU, 48, Color(1, 0.9, 0.7, 0.9), 4.0)
-	_label(font, "🔥", mc + Vector2(0, -14), 52, Color.WHITE)
-	_label(font, "HOLD TO MELT", mc + Vector2(0, 46), 19, Color.WHITE)
+	if action_text != "":
+		var col := Color(0.2, 0.6, 0.3, 0.92) if action_ok else Color(0.42, 0.39, 0.36, 0.82)
+		draw_circle(mc, MELT_RADIUS, col)
+		draw_arc(mc, MELT_RADIUS, 0, TAU, 48, Color(1, 1, 1, 0.9), 4.0)
+		var big := 40 if action_text.length() <= 4 else 30
+		_label(font, action_text, mc + Vector2(0, -12 if action_sub != "" else 0), big, Color.WHITE)
+		if action_sub != "":
+			_label(font, action_sub, mc + Vector2(0, 34), 24, Color.WHITE)
+	else:
+		var hot := Color(1.0, 0.45, 0.12, 0.9 if melting else 0.6)
+		draw_circle(mc, MELT_RADIUS, hot)
+		draw_arc(mc, MELT_RADIUS, 0, TAU, 48, Color(1, 0.9, 0.7, 0.9), 4.0)
+		_label(font, "🔥", mc + Vector2(0, -14), 52, Color.WHITE)
+		_label(font, "HOLD TO MELT", mc + Vector2(0, 46), 19, Color.WHITE)
 	# Jump / jetpack button, with the fuel gauge around it
 	var jc := jump_center()
 	draw_circle(jc, JUMP_RADIUS, Color(0.3, 0.55, 0.9, 0.75 if _jump_finger != -1 else 0.5))

@@ -6,9 +6,6 @@ extends Node3D
 
 const SPAWN := Vector3(0.0, 0.0, 17.0)
 const SPAWN_YAW := -0.3                        # facing the glacier, shed in view on the right
-const SHED_POS := Vector3(9.5, 0.0, 11.5)      # centre of the shed floor
-const SHED_DOOR := Vector3(7.3, 0.0, 11.5)     # just outside the door (on the -x side)
-const SHED_REACH := 2.6
 const FLOAT_POOL := 24
 const FINALE_FRACTION := 0.012     # when this little ice is left, the rest melts by itself
 const MAX_FLOATS_PER_FRAME := 3
@@ -38,6 +35,7 @@ var grid: IceField
 var player: Player
 var helpers: HelperSwarm
 var hud: Hud
+var shed: Shed
 var solids: Array[AABB] = []
 
 var _ground_mat: StandardMaterial3D
@@ -61,6 +59,8 @@ var _quality := 1.0            # extra render-scale factor for slow devices
 var _fps_timer := 0.0
 var _slow_timer := 0.0
 var _coach_timer := 0.0
+var _in_shed := false
+var _aimed: Dictionary = {}      # the thing for sale under the crosshair in the shed
 var _rng := RandomNumberGenerator.new()
 
 
@@ -75,10 +75,10 @@ func _ready() -> void:
 	floor_shape.shape = WorldBoundaryShape3D.new()
 	_world_body.add_child(floor_shape)
 	_build_environment()
+	_build_shed()
 	_build_ground()
 	_build_mountains()
 	var carve := _build_village()
-	_build_shed()
 	_build_trees()
 
 	grid = IceField.new()
@@ -111,6 +111,8 @@ func _ready() -> void:
 	player.unstick()
 	GameState.player = player
 
+	shed.player = player
+
 	helpers = HelperSwarm.new()
 	helpers.grid = grid
 	helpers.player = player
@@ -136,7 +138,7 @@ func _ready() -> void:
 func respawn() -> void:
 	## The "I'm stuck" button: back to the start, next to the shed.
 	player.respawn(SPAWN, SPAWN_YAW)
-	hud.toast("🏠 Back at the shed")
+	hud.toast("🏠 Back at the start")
 
 
 func _fit_render_scale() -> void:
@@ -211,8 +213,7 @@ func _process(delta: float) -> void:
 	if Input.mouse_mode != Input.MOUSE_MODE_CAPTURED:
 		_mouse_melt = false
 	player.melting = _mouse_melt or force_melt or (touch.visible and touch.melting)
-	var d := Vector2(player.position.x - SHED_DOOR.x, player.position.z - SHED_DOOR.z).length()
-	hud.near_shed = d < SHED_REACH
+	_update_shed(delta)
 	_update_floats(delta)
 	_settle_finds(delta)
 	_slow_timer += delta
@@ -238,6 +239,10 @@ func _unhandled_input(event: InputEvent) -> void:
 				if not hud.is_blocking():
 					Input.mouse_mode = Input.MOUSE_MODE_CAPTURED
 				return
+			if event.pressed and not _aimed.is_empty() and str(shed.describe(_aimed).action) != "":
+				_mouse_melt = false
+				use_aimed()   # in the shed, a click buys what you're looking at
+				return
 			_mouse_melt = event.pressed
 	elif event is InputEventMouseMotion:
 		if event.device != InputEvent.DEVICE_ID_EMULATION and Input.mouse_mode == Input.MOUSE_MODE_CAPTURED:
@@ -250,14 +255,50 @@ func _unhandled_input(event: InputEvent) -> void:
 				if not hud.is_blocking():
 					respawn()
 			KEY_E, KEY_ENTER:
-				if hud.shed_open:
-					hud.close_shed()
-				elif hud.near_shed and not hud.is_blocking():
-					hud.open_shed()
+				if hud.catalogue_open:
+					hud.close_catalogue()
+				elif not hud.is_blocking():
+					use_aimed()
 			KEY_ESCAPE:
-				if hud.shed_open:
-					hud.close_shed()
+				if hud.catalogue_open:
+					hud.close_catalogue()
 				Input.mouse_mode = Input.MOUSE_MODE_VISIBLE
+
+
+# =====================================================================================
+# The shed: walk in, look at something, buy it
+# =====================================================================================
+func _update_shed(delta: float) -> void:
+	var inside := shed.contains(player.position)
+	if inside != _in_shed:
+		_in_shed = inside
+		shed.marker.visible = not inside
+		if not inside:
+			# Walking out: done shopping (for the hints), save, and maybe an ad.
+			if GameState.tutorial_step >= 2:
+				GameState.tutorial_step = maxi(GameState.tutorial_step, 4)
+			GameState.save_game()
+			Monetization.maybe_show_interstitial("shed_exit")
+	_aimed = {}
+	if inside and not hud.is_blocking():
+		_aimed = shed.aim(player.camera.global_position, player.aim_dir())
+	shed.update(delta, _aimed)
+	hud.set_shop_info(shed.describe(_aimed) if not _aimed.is_empty() else {})
+	if hud.touch.take_action():
+		use_aimed()
+
+
+func use_aimed() -> void:
+	## Buy (or hire, or open) whatever the crosshair is on in the shed.
+	if _aimed.is_empty():
+		return
+	var r := shed.use(_aimed)
+	if r.open_catalogue:
+		hud.open_catalogue()
+	elif r.text != "":
+		hud.toast(r.text)
+	if r.ok and _aimed.kind != "catalogue":
+		GameState.tutorial_step = maxi(GameState.tutorial_step, 4)
 
 
 # =====================================================================================
@@ -265,7 +306,7 @@ func _unhandled_input(event: InputEvent) -> void:
 # =====================================================================================
 func _on_ice_melted(at: Vector3, points: int, hp: float) -> void:
 	var v := GameState.on_ice_melted(points, hp)
-	if at.is_finite():
+	if at.is_finite() and not _in_shed:   # (the numbers show through walls)
 		_pending_water += v
 		_pending_at = at + Vector3(0, 0.4, 0)
 	if GameState.has_won:
@@ -461,6 +502,13 @@ func _update_slow() -> void:
 
 func _update_coach() -> void:
 	var text := ""
+	if _in_shed and GameState.tutorial_step < 4:
+		if hud.touch_mode:
+			text = "Everything in here is for sale.\nLook at something, then tap BUY"
+		else:
+			text = "Everything in here is for sale.\nAim at something and click to buy it"
+		hud.set_coach(text)
+		return
 	match GameState.tutorial_step:
 		0:
 			if GameState.blocks_melted > 0:
@@ -476,7 +524,7 @@ func _update_coach() -> void:
 				GameState.tutorial_step = 2
 		2:
 			if GameState.water >= 20.0:
-				text = "Spend your 💧 at the 🏠 shed:\nhotter tools melt way faster"
+				text = "Spend your 💧 at the 🏠 shed:\nwalk in, hotter tools melt way faster"
 	hud.set_coach(text)
 
 
@@ -598,10 +646,12 @@ func _build_ground() -> void:
 		add_child(stream)
 
 	# A few boulders for scale.
-	var spots := [Vector3(-14, 0, 13), Vector3(-5, 0, 19), Vector3(15, 0, 7), Vector3(-19, 0, 2),
+	var spots := [Vector3(-14, 0, 13), Vector3(-5, 0, 19), Vector3(19.2, 0, 5.0), Vector3(-19, 0, 2),
 			Vector3(18, 0, -6), Vector3(4, 0, 19.5), Vector3(-20, 0, 9), Vector3(19.5, 0, 15)]
 	for i in spots.size():
 		var p: Vector3 = spots[i]
+		if shed.blocks(p.x, p.z, 1.0):
+			continue
 		var r := MeshInstance3D.new()
 		r.mesh = Scenery.boulder_mesh(i % 4)
 		r.material_override = Scenery.rock_material(0.25)
@@ -700,47 +750,10 @@ func _house(x: float, z: float, w: float, d: float, wall: float, roof: float, wa
 
 
 func _build_shed() -> void:
-	var w := 3.2    # along x; the door is on the -x wall, facing the middle of the valley
-	var d := 4.0
-	var h := 2.6
-	var base := SHED_POS
-	_box(Vector3(w, h, d), base + Vector3(0, h * 0.5, 0), Color(0.6, 0.38, 0.22))
-	var pm := PrismMesh.new()
-	pm.size = Vector3(w + 0.6, 1.3, d + 0.4)
-	_mesh(pm, base + Vector3(0, h + 0.65, 0), Color(0.75, 0.2, 0.18))
-	var front := base.x - w * 0.5 - 0.03
-	_box(Vector3(0.06, 2.0, 1.2), Vector3(front, 1.0, base.z), Color(0.32, 0.2, 0.12))
-	_box(Vector3(0.08, 0.12, 0.12), Vector3(front - 0.03, 1.0, base.z - 0.4), Color(0.95, 0.8, 0.3))
-	_box(Vector3(0.06, 0.6, 0.8), Vector3(front, 1.6, base.z + 1.35), Color(0.75, 0.9, 1.0))
-	_box(Vector3(0.06, 0.6, 0.8), Vector3(front, 1.6, base.z - 1.35), Color(0.75, 0.9, 1.0))
-	# A doormat that shows where to stand.
-	_box(Vector3(1.0, 0.04, 1.6), Vector3(front - 0.55, 0.02, base.z), Color(0.85, 0.65, 0.25))
-	solids.append(AABB(base - Vector3(w * 0.5, 0, d * 0.5), Vector3(w, h + 1.3, d)))
-	# A sign you can see from anywhere in the valley.
-	# A board over the door, and a marker you can see from anywhere in the valley.
-	_box(Vector3(0.08, 0.5, 1.8), Vector3(front - 0.05, 2.35, base.z), Color(0.92, 0.85, 0.65))
-	var board := Label3D.new()
-	board.text = "SHED"
-	board.font_size = 64
-	board.pixel_size = 0.006
-	board.modulate = Color(0.35, 0.2, 0.1)
-	board.outline_size = 0
-	board.position = Vector3(front - 0.1, 2.35, base.z)
-	board.rotation.y = -PI / 2.0
-	add_child(board)
-	var marker := Label3D.new()
-	marker.text = "🏠 Shed"
-	marker.font_size = 96
-	marker.pixel_size = 0.0006
-	marker.fixed_size = true
-	marker.outline_size = 16
-	marker.modulate = Color(1.0, 0.93, 0.72)
-	marker.billboard = BaseMaterial3D.BILLBOARD_ENABLED
-	marker.no_depth_test = true
-	marker.render_priority = 5
-	marker.outline_render_priority = 4
-	marker.position = base + Vector3(0, h + 2.4, 0)
-	add_child(marker)
+	## The tool shed by the path: a red cabin you walk into to shop (see Shed).
+	shed = Shed.new()
+	add_child(shed)
+	shed.build(IceField.detail_texture(int(level.seed)))
 
 
 func _build_trees() -> void:
@@ -760,7 +773,7 @@ func _build_trees() -> void:
 			z = _rng.randf_range(20.0, 62.0)
 			var hw: float = v.half_width + maxf(0.0, z - v.flare_z) * v.flare
 			x = side * _rng.randf_range(12.0, hw - 1.0)
-		if Vector2(x - SHED_POS.x, z - SHED_POS.z).length() < 4.5 or Scenery.on_lake(level, x, z, 2.0) \
+		if shed.blocks(x, z, 1.2) or Scenery.on_lake(level, x, z, 2.0) \
 				or Scenery.near_stream(level, x, z, 2.0) or Vector2(x - SPAWN.x, z - SPAWN.z).length() < 4.0:
 			continue
 		var s := _rng.randf_range(0.8, 1.4) if i < 30 else _rng.randf_range(0.9, 1.7)
@@ -790,7 +803,7 @@ func _build_flowers() -> void:
 		else:
 			x = rng.randf_range(-20.0, 20.0)
 			z = rng.randf_range(5.0, 19.5)
-		var blocked := false
+		var blocked := shed.blocks(x, z, 0.3)
 		for s in solids:
 			if s.grow(0.3).has_point(Vector3(x, 0.2, z)):
 				blocked = true

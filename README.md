@@ -22,7 +22,7 @@ and launch it from the new icon. Progress is saved in the browser.
 | Hold the 🔥 button to melt (you can drag from it to aim) | Hold the left mouse button |
 | JUMP button; hold it to fly with the jetpack | Space (hold to fly) |
 | 🏠 Stuck? Respawn button (top left) | R |
-| "Enter the shed" button appears at the shed door | E at the shed door, Esc to leave |
+| Walk into the 🏠 shed, look at something, then tap the green BUY button (it takes the 🔥 button's place) | Walk in, aim at something, click (or press E) |
 
 Every push to `main` rebuilds and republishes this link automatically
 (`.github/workflows/web.yml`: it imports the project, runs the smoke test,
@@ -31,8 +31,8 @@ repo's **Actions** tab; a new version is live a minute or two after it goes gree
 It needs **Settings > Pages > Source: GitHub Actions** (one-time) and a public
 repo (or GitHub Pro for a private one).
 
-The web build is a playtest build. It includes the developer tools (bottom of
-the shed's Shop tab) and fakes ads and purchases. Real ads and in-app purchases
+The web build is a playtest build. It includes the developer tools (at the end of
+the catalogue on the table inside the shed door) and fakes ads and purchases. Real ads and in-app purchases
 only work in the native app builds.
 
 ## Run it on Windows (5 minutes)
@@ -69,20 +69,21 @@ iOS comes later through Codemagic (Godot workflow). Nothing in the code is Andro
 | First-person walking (CharacterBody3D on the ice's collision mesh), step-up, a jetpack (hold JUMP, fuel refills on landing) and a respawn button | `scripts/player.gd` |
 | The valley: generated mountains with rock and snow, a cloudy sky, the lake and a meltwater stream, pine forest, boulders | `scripts/scenery.gd`, `shaders/` |
 | The heat tool: aim with the crosshair, hold to melt a ball of ice, flame and steam effects | `Player._update_tool()` |
-| 6 tools bought in order at the shed: Hair Dryer, Heat Lamp, Blowtorch, Flamethrower, Lava Hose, Orbital Mirror | `Balance.TOOLS` |
+| The shed is a walk-in store: tools hang on the pegboard, upgrades sit on the workbench, helpers wait in the hiring corner, finds go on the shelf by the door, and the catalogue on the table has the boost and purchases. Look at anything for a paper price card, then buy it where it stands | `scripts/shed.gd`, `Hud.set_shop_info()` |
+| 6 tools bought in order at the shed: Hair Dryer, Heat Lamp, Blowtorch, Flamethrower, Lava Hose, Orbital Mirror (the same models you hold) | `Balance.TOOLS`, `scripts/props.gd` |
 | 5 upgrades: Heat Output, Wider Nozzle, Longer Reach, Steam Sell, Crampon Boots | `Balance.UPGRADES` |
 | Helpers (3D models built in code): penguins with tiny torches and the sauna crew walk on the ice melting it, Kevin the volcano lobs lava bombs and watches you | `scripts/helpers.gd`, `scripts/creatures.gd`, `Balance.HELPERS` |
 | 11 buried finds frozen at fixed depths (mitten, snowmobile, mammoth, 1970s caveman, dinosaur egg...). They melt out, sell for a burst of water, and stay in the world | `World._place_finds()`, `Balance.DISCOVERIES` |
 | A village frozen inside the glacier. The church spire pokes out of the top as a hint | `World._build_village()` |
 | The valley greens up and flowers bloom where the ice is gone; villagers come out at the end | `World._update_slow()` |
 | Offline melting: helpers keep working at 25% for up to 4 h, with "watch an ad to double it" | `GameState.check_offline()` |
-| Rewarded ad: 2x heat for 5 min (stacks to 15). IAP: Remove Ads + permanent 2x, Golden Hair Dryer, Restore | HUD button, shed Shop tab |
+| Rewarded ad: 2x heat for 5 min (stacks to 15). IAP: Remove Ads + permanent 2x, Golden Hair Dryer, Restore | HUD button, the catalogue in the shed |
 | Light interstitials: only when leaving the shed, after 15% of the ice is gone, at most every 4 min, never with Remove Ads | `Monetization.maybe_show_interstitial()` |
 | Ending with a stats screen, then walk around the village or melt a new glacier | `Hud.show_ending()` |
 | Short onboarding hints the first time | `World._update_coach()` |
 | Autosave every 10s and when the app is backgrounded (`user://save3d.json`), glacier included | `GameState` |
 
-**Developer menu:** when you run from the editor, and in exports tagged `playtest` (the web build), the bottom of the shed's **Shop** tab has free meltwater, a x10/x100 melting speed toggle, "simulate 2h away", "melt everything" and "start over". Other release exports hide it. Remove `playtest` from the Web preset's `custom_features` before a public launch.
+**Developer menu:** when you run from the editor, and in exports tagged `playtest` (the web build), the end of the **catalogue** (the book on the table inside the shed door) has free meltwater, a x10/x100 melting speed toggle, "simulate 2h away", "melt everything" and "start over". Other release exports hide it. Remove `playtest` from the Web preset's `custom_features` before a public launch.
 
 ## Project layout
 
@@ -94,20 +95,22 @@ scenes/world.tscn        the only scene; everything is built in code
 scripts/balance.gd       ALL tunable numbers: layers, tools, upgrades, helpers, finds, ad rules
 scripts/game_state.gd    autoload: economy, shed purchases, offline, save/load
 scripts/levels.gd        level descriptions: glacier shape, crevasses, valley, stream
-scripts/world.gd         builds the valley (village, shed, finds) and wires everything up
+scripts/world.gd         builds the valley (village, finds) and wires everything up
+scripts/shed.gd          the walk-in shed: building, sections, what you look at and buy
+scripts/props.gd         models of the six tools and the upgrade items
 scripts/scenery.gd       mountains, sky, lake, stream, forest, boulders
 scripts/ice_field.gd     the glacier: density field, meshing, melting, collision, save string
 scripts/player.gd        first-person movement, jetpack, respawn, the heat tool
 scripts/creatures.gd     3D models of the helpers (penguin, sauna crew, Kevin)
-scripts/mesh_kit.gd      tiny modelling kit (ellipsoids, cylinders, boxes) for those models
+scripts/mesh_kit.gd      tiny modelling kit (ellipsoids, cylinders, boxes) for the models
 scripts/touch_controls.gd  phone controls (multi-touch stick, look, melt, jump)
 scripts/helpers.gd       penguins, sauna crew, Kevin the volcano
-scripts/hud.gd           HUD, shed menu, toasts, popups, ending
+scripts/hud.gd           HUD, shed price card, catalogue, toasts, popups, ending
 scripts/ui_theme.gd      shared UI look, emoji font, particle texture
-scripts/shop_row.gd      one shop list row
+scripts/shop_row.gd      one catalogue row
 scripts/fmt.gd           1.23K / 4.5M number formatting
 scripts/monetization/    ad + IAP interface, stub provider, autoload facade
-shaders/                 ice, mountain rock and snow, sky, water
+shaders/                 ice, mountain rock and snow, sky, water, shed wood
 fonts/                   subset Noto Color Emoji (the placeholder art) + license
 tests/smoke_test.gd      headless test: godot --headless -s res://tests/smoke_test.gd
 tests/screenshots.gd     renders screenshots of key moments (see the top of the file)
@@ -137,8 +140,9 @@ No game code changes beyond that.
 
 ## Placeholder art
 
-Everything is built in code. The helpers are low-poly 3D models made of simple
-shapes (`scripts/creatures.gd`); the mountains, lake and forest are generated
+Everything is built in code. The helpers, the shed and the tools are low-poly 3D
+models made of simple shapes (`scripts/creatures.gd`, `scripts/shed.gd`,
+`scripts/props.gd`); the mountains, lake and forest are generated
 (`scripts/scenery.gd`). The finds and villagers are still emoji drawn as 3D
 labels, from a bundled Noto Color Emoji subset (Apache 2.0 / OFL, see `fonts/`).
 If you add a new emoji to the code, re-run `tools/subset_emoji.sh`, or it shows
