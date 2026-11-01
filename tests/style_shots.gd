@@ -87,5 +87,31 @@ func _run() -> void:
 	_place(player, Vector3(-12.0, 1.0, -7.0), Vector3(-3.0, 1.5, -18.0))
 	await _frames(5)
 	await _shot("village_side")
+	# Every find, lined up on the grass (they all melted out with the glacier).
+	var markers: Dictionary = world._find_markers
+	var n := markers.size()
+	var k := 0
+	for d in markers:
+		var m: Node3D = markers[d]
+		m.position = Vector3(-7.0 + 14.0 * k / maxf(1.0, n - 1.0), 0.36, -6.0 + 1.2 * (k % 2))
+		k += 1
+	world.set_process(false)   # stop them turning and settling for the photo
+	_place(player, Vector3(0.0, 0.0, 3.5), Vector3(0.0, 0.5, -6.0))
+	await _frames(5)
+	await _shot("finds")
+	world.set_process(true)
+	# The villagers, close up.
+	_place(player, Vector3(-3.0, 0.0, -6.5), Vector3(-1.0, 0.6, -12.0))
+	await _frames(20)
+	await _shot("villagers")
+	# The finds shelf and the tool wall in the shed.
+	var shed = world.shed
+	shed.refresh()
+	_place(player, Vector3(11.2, 0.0, 9.6), shed.item("find", 4).node.global_position)
+	await _frames(6)
+	await _shot("shed_finds")
+	_place(player, Vector3(13.0, 0.0, 13.8), Vector3(13.2, 1.6, 8.0))
+	await _frames(6)
+	await _shot("shed_tools")
 	gs.wipe_save()
 	quit(0)

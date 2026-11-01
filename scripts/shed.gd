@@ -694,7 +694,7 @@ func _build_marker() -> void:
 	marker.pixel_size = 0.0006
 	marker.fixed_size = true
 	marker.outline_size = 16
-	marker.modulate = Color(1.0, 0.93, 0.72)
+	UiTheme.sign_label(marker, Color(1.0, 0.93, 0.72))
 	marker.billboard = BaseMaterial3D.BILLBOARD_ENABLED
 	marker.no_depth_test = true
 	marker.render_priority = 5
@@ -853,14 +853,11 @@ func _build_finds() -> void:
 	for slot in n:
 		var y: float = FIND_ROWS[FIND_ROWS.size() - 1 - slot / FIND_Z.size()]
 		var z: float = FIND_Z[slot % FIND_Z.size()]
-		var icon: String = Balance.DISCOVERIES[slot].icon if slot < Balance.DISCOVERIES.size() else "🏘️"
-		var l := Label3D.new()
-		l.text = icon
-		l.font_size = 128
-		l.pixel_size = 0.0021
-		l.alpha_cut = Label3D.ALPHA_CUT_DISCARD
-		l.position = Vector3(x + 0.22, y + 0.17, z)
-		l.rotation.y = PI / 2.0
+		# The find's model (World.find_mesh), small, facing into the room.
+		var l := Models.fitted(World.find_mesh(slot), 0.3, -0.15)   # origin mid-height, like the ice cube
+		l.position = Vector3(x + 0.22, y + 0.155, z)
+		l.rotation.y = -PI / 2.0 + 0.25 * float((slot * 3) % 3 - 1)
+		_set_layers(l, 3)
 		add_child(l)
 		# Still frozen: a see-through block of ice with a question mark inside.
 		var cmi := MeshInstance3D.new()

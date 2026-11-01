@@ -27,8 +27,8 @@ const CHURCH_ROOF := 1.6
 const TOWER := [0, -12, 2, 2]              # in front of the nave
 const TOWER_TOP := 6.0                     # the spire on top pokes out of the ice
 const SPIRE := 3.8
-const VILLAGERS = ["👵", "👴", "🧒", "👩", "👨", "🐕", "🐈", "🐓"]
-const FLOWERS = ["🌼", "🌷", "🌸", "🌻"]
+const VILLAGERS = ["Grandma", "Grandpa", "Kid", "Woman", "Man", "Dog", "Cat", "Rooster"]   # meshes in characters.glb
+const FLOWERS = ["Daisy", "Tulip", "Cosmos", "Sunflower"]   # meshes in nature.glb
 
 var level: Dictionary = Levels.current()
 var grid: IceField
@@ -43,9 +43,9 @@ var _mountains: MeshInstance3D
 var _grass := Color(0.42, 0.57, 0.3)
 var _moraine := Color(0.55, 0.46, 0.34)
 var _mats := {}
-var _find_markers := {}        # discovery index -> Label3D
+var _find_markers := {}        # discovery index -> Node3D (see _make_find_marker)
 var _flowers: Array = []       # {node, x, z, threshold}
-var _villagers: Array = []     # Label3D
+var _villagers: Array = []     # Node3D
 var _floats: Array = []        # {node, t}
 var _float_i := 0
 var _floats_this_frame := 0
@@ -370,29 +370,47 @@ func _place_finds() -> void:
 				GameState.discover(d)
 
 
-func _make_find_marker(d: int) -> Label3D:
+# How big each find is (its longest side, in metres), in Balance.DISCOVERIES order.
+const FIND_SIZES := [0.6, 0.8, 0.7, 1.6, 1.8, 0.7, 1.3, 1.1, 0.8, 0.9, 0.8]
+
+
+static func find_mesh(d: int) -> Mesh:
+	## The model of find d (art/blender/build_finds.py); past the end, the
+	## village itself, as a tiny house (the shed's last shelf slot).
+	if d >= Balance.DISCOVERIES.size():
+		return Models.baked("house_0")
+	return Models.baked("finds", "Find%d" % d)
+
+
+func _make_find_marker(d: int) -> Node3D:
+	## A find in the ice: its model (resting 0.36 m below the marker's origin,
+	## see _settle_finds), turning slowly once found, with its name above.
 	var info: Dictionary = Balance.DISCOVERIES[d]
-	var l := Label3D.new()
-	l.text = info.icon
-	l.font_size = 128
-	l.pixel_size = 0.0055
-	l.billboard = BaseMaterial3D.BILLBOARD_FIXED_Y
-	l.alpha_cut = Label3D.ALPHA_CUT_DISCARD
-	l.visible = false
+	var size: float = FIND_SIZES[d] if d < FIND_SIZES.size() else 0.8
+	var m := Models.fitted(find_mesh(d), size, -0.36)
+	m.rotation.y = PI + float(d) * 0.7
+	m.visible = false
 	var name_tag := Label3D.new()
-	name_tag.text = info.name
+	name_tag.text = "%s %s" % [info.icon, info.name]
 	name_tag.font_size = 40
 	name_tag.pixel_size = 0.0007
 	name_tag.fixed_size = true
 	name_tag.outline_size = 10
+	UiTheme.sign_label(name_tag)
 	name_tag.billboard = BaseMaterial3D.BILLBOARD_ENABLED
-	name_tag.position = Vector3(0, 0.55, 0)
-	l.add_child(name_tag)
-	return l
+	name_tag.position = Vector3(0, -0.36 + (find_mesh(d).get_aabb().size.y / _longest(find_mesh(d))) * size + 0.25, 0)
+	m.add_child(name_tag)
+	m.move_child(name_tag, 0)
+	return m
+
+
+static func _longest(mesh: Mesh) -> float:
+	var s := mesh.get_aabb().size
+	return maxf(s.x, maxf(s.y, s.z))
 
 
 func _reveal_find(d: int, animate: bool) -> void:
-	var m: Label3D = _find_markers.get(d)
+	var m: Node3D = _find_markers.get(d)
 	if m == null:
 		return
 	m.visible = true
@@ -407,9 +425,10 @@ func _settle_finds(delta: float) -> void:
 	## Found things drop to whatever is under them as the ice melts away.
 	## Their name tags only show up close.
 	for d in _find_markers:
-		var m: Label3D = _find_markers[d]
+		var m: Node3D = _find_markers[d]
 		if not m.visible:
 			continue
+		m.rotation.y += delta * 0.5   # turning slowly, to show it off
 		(m.get_child(0) as Label3D).visible = m.position.distance_squared_to(player.position) < 49.0
 		var rest := _floor_under(m.position) + 0.36
 		if m.position.y > rest + 0.001:
@@ -440,7 +459,7 @@ func _build_float_pool() -> void:
 		l.font_size = 56
 		l.pixel_size = 0.005
 		l.outline_size = 12
-		l.modulate = Color(0.75, 0.92, 1.0)
+		UiTheme.sign_label(l, Color(0.75, 0.92, 1.0))
 		l.billboard = BaseMaterial3D.BILLBOARD_ENABLED
 		l.no_depth_test = true
 		l.render_priority = 10
@@ -488,7 +507,7 @@ func _update_slow() -> void:
 	if _mountains != null:
 		(_mountains.material_override as ShaderMaterial).set_shader_parameter("foot_color", _ground_mat.albedo_color)
 	for f in _flowers:
-		var node: Label3D = f.node
+		var node: Node3D = f.node
 		if node.visible:
 			continue
 		var bloom := false
@@ -785,33 +804,30 @@ func _build_flowers() -> void:
 				blocked = true
 		if blocked:
 			continue
-		var l := Label3D.new()
-		l.text = FLOWERS[rng.randi() % FLOWERS.size()]
-		l.font_size = 64
-		l.pixel_size = 0.0045
-		l.billboard = BaseMaterial3D.BILLBOARD_FIXED_Y
-		l.alpha_cut = Label3D.ALPHA_CUT_DISCARD
-		l.position = Vector3(x, 0.15, z)
+		var l := Models.baked_instance(Models.baked("nature", FLOWERS[rng.randi() % FLOWERS.size()]))
+		l.position = Vector3(x, 0.0, z)
+		l.rotation.y = rng.randf() * TAU
+		l.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 		l.visible = false
 		add_child(l)
 		_flowers.append({"node": l, "x": x, "z": z, "inside": inside, "threshold": rng.randf_range(0.05, 0.95)})
 
 
 func _build_villagers() -> void:
-	var spots := [Vector3(-7.5, 0.4, -16.6), Vector3(-2.5, 0.4, -18.3), Vector3(7.0, 0.4, -17.4),
-		Vector3(1.0, 0.4, -9.2), Vector3(-6.5, 0.4, -10.5), Vector3(4.5, 0.4, -10.8),
-		Vector3(3.2, 0.4, -19.0), Vector3(-0.8, 0.4, -20.5)]
+	## The villagers who come out to celebrate when the ice is gone
+	## (art/blender/build_characters.py). They hop on the spot, facing the valley.
+	var spots := [Vector3(-7.5, 0.0, -16.6), Vector3(-2.5, 0.0, -18.3), Vector3(7.0, 0.0, -17.4),
+		Vector3(1.0, 0.0, -9.2), Vector3(-6.5, 0.0, -10.5), Vector3(4.5, 0.0, -10.8),
+		Vector3(3.2, 0.0, -19.0), Vector3(-0.8, 0.0, -20.5)]
 	for i in VILLAGERS.size():
-		var l := Label3D.new()
-		l.text = VILLAGERS[i]
-		l.font_size = 128
-		l.pixel_size = 0.0065
-		l.billboard = BaseMaterial3D.BILLBOARD_FIXED_Y
-		l.alpha_cut = Label3D.ALPHA_CUT_DISCARD
-		l.position = spots[i]
-		l.visible = false
-		add_child(l)
-		_villagers.append(l)
-		var tw := l.create_tween().set_loops()
-		tw.tween_property(l, "position:y", 0.62, 0.35 + 0.05 * i).set_trans(Tween.TRANS_SINE)
-		tw.tween_property(l, "position:y", 0.4, 0.35 + 0.05 * i).set_trans(Tween.TRANS_SINE)
+		var v := Node3D.new()
+		var mi := Models.baked_instance(Models.baked("characters", VILLAGERS[i]))
+		v.add_child(mi)
+		v.position = spots[i]
+		v.rotation.y = PI + (float(i % 3) - 1.0) * 0.35   # face +Z, toward you, give or take
+		v.visible = false
+		add_child(v)
+		_villagers.append(v)
+		var tw := mi.create_tween().set_loops()
+		tw.tween_property(mi, "position:y", 0.22, 0.35 + 0.05 * i).set_trans(Tween.TRANS_SINE)
+		tw.tween_property(mi, "position:y", 0.0, 0.35 + 0.05 * i).set_trans(Tween.TRANS_SINE)

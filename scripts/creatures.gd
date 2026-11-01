@@ -79,13 +79,15 @@ static func _model_part(mesh: Mesh, parent: Node3D, scarf: Variant = null) -> Me
 # =====================================================================================
 static func sauna(variant: int) -> Node3D:
 	## Children: Body (rig), Bucket (where the steam comes from), FootL, FootR.
+	## The model is made in Blender: art/blender/build_characters.py.
 	var root := Node3D.new()
 	var body := Node3D.new()
 	body.name = "Body"
 	root.add_child(body)
-	var towel := variant % TOWELS.size()
-	var skin := (variant / TOWELS.size() + variant) % SKINS.size()
-	_mesh_instance(_sauna_body(towel, skin), body)
+	var towel: Color = TOWELS[variant % TOWELS.size()]
+	var skin: Color = SKINS[(variant / TOWELS.size() + variant) % SKINS.size()]
+	var colours := {"towel": towel, "towel_stripe": towel.darkened(0.25), "skin": skin}
+	body.add_child(Models.baked_instance(Models.baked("characters", "SaunaBody", colours)))
 	var bucket := Node3D.new()
 	bucket.name = "Bucket"
 	bucket.position = Vector3(0, 0.7, -0.27)
@@ -95,59 +97,8 @@ static func sauna(variant: int) -> Node3D:
 		foot.name = "FootL" if side < 0.0 else "FootR"
 		foot.position = Vector3(0.085 * side, 0.0, 0.0)
 		root.add_child(foot)
-		_mesh_instance(_sauna_leg(skin), foot)
+		foot.add_child(Models.baked_instance(Models.baked("characters", "SaunaLeg", {"skin": skin})))
 	return root
-
-
-static func _sauna_body(towel: int, skin: int) -> ArrayMesh:
-	var key := "sauna_%d_%d" % [towel, skin]
-	if _cache.has(key):
-		return _cache[key]
-	var st := MeshKit.begin()
-	var tc: Color = TOWELS[towel]
-	var sk: Color = SKINS[skin]
-	var stripe := tc.darkened(0.25) if towel == 0 else tc.darkened(0.3)
-	# Towel wrapped round the middle, with a stripe.
-	MeshKit.cylinder(st, Vector3(0, 0.3, 0), Vector3(0, 0.82, 0), 0.215, 0.19, tc, 16)
-	MeshKit.cylinder(st, Vector3(0, 0.4, 0), Vector3(0, 0.46, 0), 0.222, 0.219, stripe, 16, false)
-	MeshKit.cylinder(st, Vector3(0, 0.68, 0), Vector3(0, 0.72, 0), 0.204, 0.2, stripe, 16, false)
-	# Shoulders, neck, head.
-	MeshKit.ellipsoid(st, Vector3(0, 0.84, 0), Vector3(0.21, 0.11, 0.15), sk)
-	MeshKit.cylinder(st, Vector3(0, 0.86, 0), Vector3(0, 0.96, 0), 0.06, 0.06, sk, 8, false)
-	MeshKit.ellipsoid(st, Vector3(0, 1.04, 0), Vector3(0.13, 0.135, 0.13), sk)
-	MeshKit.ellipsoid(st, Vector3(0, 1.025, -0.13), Vector3(0.024, 0.024, 0.024), sk.darkened(0.05), Basis.IDENTITY, 4, 8)
-	for side in [-1.0, 1.0]:
-		# Happy closed eyes, rosy cheeks.
-		MeshKit.ellipsoid(st, Vector3(0.047 * side, 1.055, -0.118), Vector3(0.026, 0.007, 0.01), Color(0.2, 0.12, 0.1), Basis(Vector3.FORWARD, 0.25 * side), 3, 8)
-		MeshKit.ellipsoid(st, Vector3(0.075 * side, 1.01, -0.105), Vector3(0.03, 0.02, 0.012), Color(1.0, 0.5, 0.5), Basis.IDENTITY, 4, 8)
-		# Arms reaching forward to hold the bucket.
-		MeshKit.cylinder(st, Vector3(0.19 * side, 0.85, 0.0), Vector3(0.16 * side, 0.7, -0.17), 0.048, 0.042, sk, 8)
-		MeshKit.cylinder(st, Vector3(0.16 * side, 0.7, -0.17), Vector3(0.12 * side, 0.68, -0.25), 0.042, 0.04, sk, 8)
-		MeshKit.ellipsoid(st, Vector3(0.12 * side, 0.68, -0.26), Vector3(0.045, 0.045, 0.045), sk, Basis.IDENTITY, 5, 8)
-	# Towel turban with a knot.
-	MeshKit.ellipsoid(st, Vector3(0, 1.14, 0.01), Vector3(0.155, 0.1, 0.155), tc)
-	MeshKit.ellipsoid(st, Vector3(0, 1.21, -0.06), Vector3(0.06, 0.05, 0.05), tc.darkened(0.05), Basis.IDENTITY, 5, 8)
-	# Wooden bucket of glowing stones.
-	MeshKit.cylinder(st, Vector3(0, 0.56, -0.27), Vector3(0, 0.7, -0.27), 0.11, 0.125, Color(0.6, 0.38, 0.2), 12)
-	MeshKit.cylinder(st, Vector3(0, 0.6, -0.27), Vector3(0, 0.625, -0.27), 0.119, 0.122, Color(0.3, 0.3, 0.32), 12, false)
-	MeshKit.ellipsoid(st, Vector3(-0.03, 0.705, -0.26), Vector3(0.05, 0.03, 0.05), Color(1.0, 0.45, 0.12), Basis.IDENTITY, 4, 8)
-	MeshKit.ellipsoid(st, Vector3(0.04, 0.705, -0.29), Vector3(0.045, 0.028, 0.045), Color(0.95, 0.3, 0.1), Basis.IDENTITY, 4, 8)
-	var mesh := MeshKit.finish(st)
-	_cache[key] = mesh
-	return mesh
-
-
-static func _sauna_leg(skin: int) -> ArrayMesh:
-	var key := "sauna_leg_%d" % skin
-	if _cache.has(key):
-		return _cache[key]
-	var st := MeshKit.begin()
-	var sk: Color = SKINS[skin]
-	MeshKit.cylinder(st, Vector3(0, 0.04, 0), Vector3(0, 0.36, 0), 0.05, 0.058, sk, 8)
-	MeshKit.ellipsoid(st, Vector3(0, 0.03, -0.035), Vector3(0.05, 0.03, 0.085), sk, Basis.IDENTITY, 4, 8)
-	var mesh := MeshKit.finish(st)
-	_cache[key] = mesh
-	return mesh
 
 
 # =====================================================================================

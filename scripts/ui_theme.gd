@@ -164,3 +164,11 @@ static func colored_button(b: Button, color: Color, _radius: int = 14) -> void:
 	b.add_theme_stylebox_override("hover", enamel(color.lightened(0.12)))
 	b.add_theme_stylebox_override("pressed", enamel(color.darkened(0.1), true))
 	b.add_theme_stylebox_override("disabled", enamel(color.lerp(Color(0.6, 0.58, 0.55), 0.7)))
+
+
+static func sign_label(l: Label3D, color: Color = CREAM) -> void:
+	## Floating lettering in the world (the shed's sign, Kevin's name, +💧
+	## numbers): the display font with an ink outline, like the HUD.
+	l.font = display_font()
+	l.modulate = color
+	l.outline_modulate = INK
