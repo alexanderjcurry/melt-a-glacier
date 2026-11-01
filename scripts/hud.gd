@@ -654,11 +654,6 @@ func _build_catalogue_rows() -> void:
 		_row_refreshers.append(func(): speed.set_button("x%d" % int(GameState.debug_speed), true))
 		speed.button.pressed.connect(func():
 			GameState.debug_speed = 1.0 if GameState.debug_speed >= 100.0 else GameState.debug_speed * 10.0)
-		var away := _row("🕑", "Simulate 2h away", "Tests the offline melting popup (needs helpers).")
-		away.set_button("Go", true)
-		away.button.pressed.connect(func():
-			GameState.last_active_time -= 7200.0
-			GameState.check_offline())
 		var melt := _row("☀️", "Melt everything", "Skip straight to the ending.")
 		melt.set_button("Melt", true)
 		melt.button.pressed.connect(func():
@@ -725,22 +720,6 @@ func _close_popup(p: Dictionary) -> void:
 	if popups.get_child_count() == 0 and not catalogue_open:
 		player.input_enabled = true
 		touch.visible = touch_mode
-
-
-func show_offline(result: Dictionary) -> void:
-	var water: float = result.water
-	var body := "While you were away for %s, your helpers melted %s m³ of ice.\n\nYou earned 💧%s" % [
-		Fmt.duration(result.seconds), Fmt.num(float(result.blocks) * IceField.POINT_VOLUME), Fmt.num(water)]
-	if result.get("capped", false):
-		body += "\n(Away time counts for up to %d hours.)" % int(Balance.OFFLINE_CAP_SECONDS / 3600.0)
-	var p := _popup("Welcome back!", body)
-	_popup_button(p, "📺  Watch an ad to double it (+💧%s)" % Fmt.num(water), Color(0.85, 0.45, 0.15), func():
-		Monetization.show_rewarded(Monetization.PLACEMENT_OFFLINE_DOUBLE, func(ok: bool):
-			if ok:
-				GameState.grant_water(water)
-				toast("Doubled! +💧" + Fmt.num(water))
-			_close_popup(p)))
-	_popup_button(p, "Collect", Color(0.25, 0.5, 0.85), func(): _close_popup(p))
 
 
 func show_ending() -> void:

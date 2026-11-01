@@ -5,7 +5,6 @@ extends Node
 signal changed                                   # anything changed; UI should refresh
 signal discovered_item(index: int, value: float)
 signal won
-signal offline_earned(result: Dictionary)        # {seconds, blocks, water, capped}
 
 const SAVE_PATH := "user://save3d.json"
 const SAVE_VERSION := 3            # 3 = smooth ice. Older saves start a fresh glacier.
@@ -25,7 +24,6 @@ var owns_golden_dryer: bool = false    # IAP (cosmetic)
 var golden_equipped: bool = false
 var play_time: float = 0.0
 var has_won: bool = false
-var last_active_time: float = 0.0
 var player_pos: Vector3 = Vector3.INF  # INF = use the spawn point
 var player_yaw: float = 0.0
 var player_pitch: float = -0.15
@@ -37,12 +35,9 @@ var grid: IceField                     # set by the world when it's built
 var player: Node3D
 var debug_speed: float = 1.0           # dev menu multiplier
 var _autosave_timer: float = 0.0
-var _last_tick_time: float = 0.0
-var _rng := RandomNumberGenerator.new()
 
 
 func _ready() -> void:
-	_rng.randomize()
 	reset_state()
 	load_game()
 
@@ -69,7 +64,6 @@ func reset_state(keep_purchases: bool = false) -> void:
 	owns_remove_ads_2x = keep_ads if keep_purchases else false
 	owns_golden_dryer = keep_gold if keep_purchases else false
 	golden_equipped = golden_equipped and owns_golden_dryer
-	last_active_time = now()
 	player_pos = Vector3.INF
 	player_yaw = 0.0
 	player_pitch = -0.15
@@ -82,12 +76,6 @@ func now() -> float:
 
 
 func _process(delta: float) -> void:
-	# A frozen main loop (phone locked, app in background, browser tab hidden)
-	# counts as time away instead of one giant frame.
-	var t := now()
-	if _last_tick_time > 0.0 and t - _last_tick_time >= Balance.OFFLINE_MIN_SECONDS:
-		_grant_offline(t - _last_tick_time)
-	_last_tick_time = t
 	if not has_won:
 		play_time += minf(delta, 1.0)
 	_autosave_timer += delta
@@ -271,36 +259,6 @@ func start_boost() -> void:
 	changed.emit()
 
 
-# --- Offline earnings -------------------------------------------------------------
-func check_offline() -> void:
-	## Called once the world is ready: pays out the time since the last save.
-	var elapsed := now() - last_active_time
-	last_active_time = now()
-	_last_tick_time = now()
-	_grant_offline(elapsed)
-
-
-func _grant_offline(elapsed: float) -> void:
-	if has_won or grid == null or elapsed < Balance.OFFLINE_MIN_SECONDS:
-		return
-	var secs := minf(elapsed, Balance.OFFLINE_CAP_SECONDS)
-	# Boosts don't run while you're away; the permanent IAP multiplier does.
-	var mult := Balance.PERMANENT_MULT if owns_remove_ads_2x else 1.0
-	var base_power := 0.0
-	for i in Balance.HELPERS.size():
-		base_power += float(Balance.HELPERS[i].power) * float(helper_counts[i])
-	var budget := base_power * mult * secs * Balance.OFFLINE_EFFICIENCY
-	if budget <= 0.0:
-		return
-	var before := water
-	var blocks := grid.melt_budget(budget, _rng)   # each melted block pays out via the world
-	if blocks <= 0:
-		return
-	offline_earned.emit({"seconds": secs, "blocks": blocks, "water": water - before,
-		"capped": elapsed > Balance.OFFLINE_CAP_SECONDS})
-	check_win()
-
-
 func _notification(what: int) -> void:
 	match what:
 		NOTIFICATION_APPLICATION_PAUSED, NOTIFICATION_APPLICATION_FOCUS_OUT, NOTIFICATION_WM_CLOSE_REQUEST:
@@ -330,7 +288,6 @@ func to_dict() -> Dictionary:
 		"golden_equipped": golden_equipped,
 		"play_time": play_time,
 		"has_won": has_won,
-		"last_active_time": last_active_time,
 		"player_pos": [player_pos.x, player_pos.y, player_pos.z] if player_pos.is_finite() else [],
 		"player_yaw": player_yaw,
 		"player_pitch": player_pitch,
@@ -340,8 +297,6 @@ func to_dict() -> Dictionary:
 
 
 func save_game() -> void:
-	if not has_won:
-		last_active_time = now()
 	var f := FileAccess.open(SAVE_PATH, FileAccess.WRITE)
 	if f == null:
 		push_warning("Could not save: %s" % FileAccess.get_open_error())
@@ -377,7 +332,6 @@ func load_game() -> void:
 	boost_until = float(data.get("boost_until", 0.0))
 	play_time = float(data.get("play_time", 0.0))
 	has_won = bool(data.get("has_won", false))
-	last_active_time = float(data.get("last_active_time", now()))
 	var pp: Array = data.get("player_pos", [])
 	player_pos = Vector3(float(pp[0]), float(pp[1]), float(pp[2])) if pp.size() == 3 else Vector3.INF
 	player_yaw = float(data.get("player_yaw", 0.0))

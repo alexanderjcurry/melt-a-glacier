@@ -128,8 +128,6 @@ func _ready() -> void:
 	_fit_render_scale()
 
 	GameState.won.connect(_on_won)
-	GameState.offline_earned.connect(hud.show_offline)
-	GameState.check_offline()
 	if GameState.has_won:
 		_on_won.call_deferred()
 	_update_slow()

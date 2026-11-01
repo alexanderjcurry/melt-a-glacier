@@ -99,12 +99,8 @@ const DISCOVERIES = [
 	{"name": "Dinosaur Egg", "icon": "🥚", "layer": 7, "value": 90000.0, "flavor": "It's warm now. Uh oh."},
 ]
 
-# --- Offline, boosts, ads ------------------------------------------------------------
-# Kept modest on purpose: melting it yourself is the fun part, and the glacier
-# has an ending, so time away shouldn't finish it for you.
-const OFFLINE_EFFICIENCY := 0.25       # helpers work at quarter speed while you're away
-const OFFLINE_CAP_SECONDS := 4.0 * 3600.0
-const OFFLINE_MIN_SECONDS := 60.0
+# --- Boosts, ads -----------------------------------------------------------------------
+# Nothing melts while you're away: it's a game you play in a sitting.
 const BOOST_DURATION := 300.0          # "watch an ad for 2x heat for 5 min"
 const BOOST_MULT := 2.0
 const PERMANENT_MULT := 2.0            # from the "Remove ads + permanent 2x" IAP

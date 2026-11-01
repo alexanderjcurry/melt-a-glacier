@@ -1,9 +1,9 @@
 extends SceneTree
 ## Headless smoke test: godot --headless -s res://tests/smoke_test.gd
 ## Builds the valley, walks up onto the glacier, melts with the tool, checks
-## the phone controls, jetpack and respawn, buys things, digs up a find, saves,
-## fakes time away, and melts everything to the ending. Exits with code 1 if
-## anything fails.
+## the phone controls, jetpack and respawn, buys things, digs up a find, checks
+## that loose ice melts by itself, saves, and melts everything to the ending.
+## Exits with code 1 if anything fails.
 ## Variables stay untyped: this script compiles before the GameState autoload
 ## exists, so it can't name classes that use it (World, Player, Hud...).
 
@@ -316,11 +316,78 @@ func _run() -> void:
 	grid.find_floating_now()
 	var floating: int = grid.floating_count()
 	var fade := 0.0
-	while grid.floating_count() > 0 and fade < 12.0:
+	while grid.floating_count() > 0 and fade < 15.0:
 		grid._melt_floating(0.2)
 		fade += 0.2
 	check(floating == 125 and grid.floating_count() == 0 and fade > 3.0,
 		"a block of ice left floating drips away (%d bits, gone after %.1f s)" % [floating, fade])
+
+	# --- Small loose chunks on the ground melt away too; bigger ones stay.
+	# Hollow out a room at the foot of thick ice and leave two blocks standing
+	# in it: 3x3x2 points (18, about 2 m³) and 4x4x3 (48, 6 m³).
+	var room := Vector3.INF
+	for k in range(8, grid.nz - 8):
+		for i in range(8, grid.nx - 8):
+			var rp: Vector3 = grid.origin + Vector3(i, 0, k) * 0.5
+			if rp.distance_to(Vector3(11.5, 0.0, -17.0)) < 8.0:
+				continue
+			var thick := true
+			for corner in [Vector3(-3.5, 0, -2.5), Vector3(3.5, 0, -2.5), Vector3(-3.5, 0, 2.5), Vector3(3.5, 0, 2.5), Vector3.ZERO]:
+				if grid.surface_y(rp.x + corner.x, rp.z + corner.z) < 3.5:
+					thick = false
+			if thick:
+				room = rp
+				break
+		if room != Vector3.INF:
+			break
+	var small := []
+	var big := []
+	var ff2: PackedFloat32Array = grid.f
+	for s in ff2.size():
+		var d: Vector3 = grid.point_pos(s) - room
+		if absf(d.x) > 3.01 or absf(d.z) > 2.01 or d.y > 2.01:
+			continue
+		if d.x >= -2.51 and d.x <= -1.49 and absf(d.z) <= 0.51 and d.y <= 0.51:
+			small.append(s)
+			ff2[s] = 1.0
+		elif d.x >= 0.49 and d.x <= 2.01 and d.z >= -0.51 and d.z <= 1.01 and d.y <= 1.01:
+			big.append(s)
+			ff2[s] = 1.0
+		elif not grid.find_points.has(s):
+			ff2[s] = 0.0
+	grid.f = ff2
+	grid._count()
+	grid._touch(0, grid.nx - 1, 0, grid.nz - 1)
+	grid.find_floating_now()
+	var small_marked := 0
+	for s in small:
+		if grid._floating.has(s):
+			small_marked += 1
+	var big_marked := 0
+	for s in big:
+		if grid._floating.has(s):
+			big_marked += 1
+	var t_small := 0.0
+	var shrank := false
+	while t_small < 15.0:
+		var left := 0
+		for s in small:
+			if grid.f[s] > 0.5:
+				left += 1
+		if left == 0:
+			break
+		if left < small.size() and left > 0:
+			shrank = true   # part of it is gone, part still there: it melts from the outside in
+		grid._melt_floating(0.2)
+		t_small += 0.2
+	var big_left := 0
+	for s in big:
+		if grid.f[s] > 0.5:
+			big_left += 1
+	check(room != Vector3.INF and small.size() == 18 and big.size() == 48, "set up two loose chunks on the ground")
+	check(small_marked == 18 and t_small > 2.0 and t_small < 15.0 and shrank,
+		"a small loose chunk on the ground melts away by itself, outside first (gone after %.1f s)" % t_small)
+	check(big_marked == 0 and big_left == 48, "a bigger chunk stays for you to melt (%d/48 left)" % big_left)
 
 	# --- Glacier save string round trip (into a second, fresh glacier).
 	var saved: String = grid.to_save_string()
@@ -330,17 +397,6 @@ func _run() -> void:
 	check(copy.load_save_string(saved) and copy.remaining <= grid.remaining + 5 and copy.remaining >= grid.remaining - 5,
 		"glacier save/load round trip (%d vs %d)" % [copy.remaining, grid.remaining])
 	copy.queue_free()
-
-	# --- Time away: helpers keep melting.
-	var got := []
-	gs.offline_earned.connect(func(r): got.append(r))
-	gs.last_active_time -= 3600.0
-	gs.check_offline()
-	check(got.size() == 1 and got[0].blocks > 0, "an hour away melted %s blocks" % (got[0].blocks if got.size() > 0 else 0))
-	check(world.hud.popups.get_child_count() > 0, "welcome back popup shown")
-	gs._last_tick_time -= 600.0
-	await _frames(2)
-	check(got.size() == 2 and absf(got[1].seconds - 600.0) < 5.0, "a frozen app (locked phone) also pays out")
 
 	# --- Melt everything: all finds, the ending.
 	var won := [false]

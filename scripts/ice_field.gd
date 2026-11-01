@@ -24,13 +24,16 @@ const MELT_K := 0.3              # tool hp -> density. A point of fresh snow tak
 const POINT_VOLUME := RES * RES * RES
 const REMESH_BUDGET_USEC := 7000 # per frame
 const CHUNK_MIN_INTERVAL := 0.07 # re-mesh the same chunk at most this often (seconds)
-# Ice that has lost its connection to the ground (or tiny crumbs on it) melts
-# away slowly by itself, so carving doesn't leave floating patches around.
-const FLOAT_SCAN_DELAY := 1.2    # seconds after something melts before looking for floating bits
+# Ice that has lost its connection to the ground, and small loose chunks
+# sitting on the ground, melt away slowly by themselves, from the outside in,
+# so carving doesn't leave floating patches and fiddly scraps around.
+const FLOAT_SCAN_DELAY := 1.2    # seconds after something melts before looking for loose bits
 const FLOAT_BUDGET_USEC := 1200  # per frame, for that search
-const FLOAT_MELT_RATE := 0.12    # density lost per second: a patch drips away in about 4 s
+const FLOAT_MELT_RATE := 0.08    # density lost per second per side open to the air: corners go
+                                 # first (about 2 s), flat faces last (about 6 s), like real melting
+const FLOAT_CORE_RATE := 0.06    # inside a bit, so big ones soften all the way through
 const FLOAT_TICK := 0.2
-const CRUMB_POINTS := 4          # bits of ice resting on the ground smaller than this melt too
+const SMALL_CHUNK_POINTS := 32   # loose chunks on the ground smaller than this (4 m³) melt too
 
 var level: Dictionary
 var origin := Vector3.ZERO       # world position of grid point (0, 0, 0)
@@ -73,7 +76,7 @@ var _runs := PackedInt32Array()  # 3 ints per run: padded column index, lowest j
 var _col_first := PackedInt32Array()   # per padded column: its first run
 var _col_count := PackedInt32Array()   # and how many runs it has
 var _group := PackedInt32Array() # per run: its group, -1 = not reached yet
-var _group_melts := PackedByteArray()  # per group: 1 = floating (or a crumb), melt it
+var _group_melts := PackedByteArray()  # per group: 1 = floating (or a small chunk), melt it
 var _queue := PackedInt32Array()
 var _q_head := 0
 var _next_seed := 0
@@ -574,24 +577,6 @@ func damage_sphere(center: Vector3, radius: float, amount: float) -> int:
 	return melted
 
 
-func melt_budget(budget: float, rng: RandomNumberGenerator) -> int:
-	## Spends `budget` hp of heat on random spots on top of the ice, the way
-	## the helpers would (used for time away). Returns grid points melted.
-	var melted := 0
-	var bite := maxf(30.0, budget / 1500.0)
-	var radius := clampf(0.9 + sqrt(bite) * 0.03, 0.9, 2.5)
-	var guard := 0
-	while budget > 0.0 and remaining > 0 and guard < 4000:
-		guard += 1
-		var p := random_surface_point(rng)
-		if p == Vector3.INF:
-			break
-		var spend := minf(bite, budget)
-		melted += damage_sphere(p + Vector3(0, -0.3, 0), radius, spend)
-		budget -= spend
-	return melted
-
-
 func melt_everything() -> void:
 	## The finale (and the dev menu): whatever ice is left turns to water.
 	var melted := 0
@@ -669,7 +654,7 @@ func _process(delta: float) -> void:
 
 
 # =====================================================================================
-# Floating ice: bits with nothing holding them up slowly melt away
+# Loose ice: floating bits, and small chunks on the ground, slowly melt away
 # =====================================================================================
 func _update_floating(delta: float) -> void:
 	_float_t += delta
@@ -782,7 +767,7 @@ func _group_runs(deadline: int) -> bool:
 		if _q_head >= _queue.size():
 			if not _queue.is_empty():
 				# This group is done: does it melt?
-				_group_melts.append(1 if (not _cur_grounded or _cur_size < CRUMB_POINTS) else 0)
+				_group_melts.append(1 if (not _cur_grounded or _cur_size < SMALL_CHUNK_POINTS) else 0)
 				_queue.clear()
 				_q_head = 0
 			while _next_seed < nruns and _group[_next_seed] >= 0:
@@ -877,30 +862,33 @@ func _drip_from(lo: Vector3, hi: Vector3) -> void:
 func _melt_floating(dt: float) -> void:
 	if _floating.is_empty():
 		return
-	var per := FLOAT_MELT_RATE * dt
+	# The more sides of a point are open to the air, the faster it melts: a
+	# chunk loses its corners, then its edges, and shrinks from the outside in
+	# instead of fading all at once.
+	var count := _floating.size()
+	var open := PackedByteArray()
+	open.resize(count)
+	for n in count:
+		open[n] = _open_sides(_floating[n])
 	var keep := PackedInt32Array()
 	var melted := 0
 	var hp_sum := 0.0
 	var at := Vector3.ZERO
 	var found: Array = []
-	var i0 := nx
-	var i1 := -1
-	var k0 := nz
-	var k1 := -1
-	var j0 := ny
-	for s in _floating:
+	var cols := {}
+	var drip := -1
+	var drip_n := 0
+	for n in count:
+		var s := _floating[n]
 		var v := f[s]
-		var nv := maxf(v - per, 0.0)
+		var rate := FLOAT_CORE_RATE
+		if v <= 0.5:
+			rate = FLOAT_MELT_RATE * maxi(open[n], 2)   # already gone: fade out
+		elif open[n] > 0:
+			rate = FLOAT_MELT_RATE * open[n]
+		var nv := maxf(v - rate * dt, 0.0)
 		f[s] = nv
-		var j := s / plane
-		var r := s - j * plane
-		var i := r % px - 1
-		var k := r / px - 1
-		i0 = mini(i0, i)
-		i1 = maxi(i1, i)
-		k0 = mini(k0, k)
-		k1 = maxi(k1, k)
-		j0 = mini(j0, j)
+		cols[s % plane] = true
 		if v > 0.5 and nv <= 0.5:
 			melted += 1
 			hp_sum += _layer_hp[lay[s]]
@@ -909,17 +897,45 @@ func _melt_floating(dt: float) -> void:
 				found.append(find_points[s])
 		if nv > 0.0:
 			keep.append(s)
+			if open[n] > 0 and nv > 0.5:
+				drip_n += 1
+				if randi() % drip_n == 0:
+					drip = s   # one melting spot, picked at random, drips this tick
 	_floating = keep
-	if i1 >= 0:
-		_touch(i0, i1, k0, k1)
-		_drip_from(origin + Vector3(i0, j0, k0) * RES, origin + Vector3(i1, j0, k1) * RES)
-	if _floating.is_empty() and _drips != null:
+	# Only the columns that changed: loose bits can be far apart.
+	for r in cols:
+		var i: int = r % px - 1
+		var k: int = r / px - 1
+		_touch(i, i, k, k)
+	if drip >= 0:
+		var p := point_pos(drip)
+		_drip_from(p - Vector3(0.3, 0.25, 0.3), p + Vector3(0.3, -0.25, 0.3))
+	elif _drips != null:
 		_drips.emitting = false
 	if melted > 0:
 		remaining -= melted
 		ice_melted.emit(at / float(melted), melted, hp_sum)
 	for d in found:
 		_expose(d)
+
+
+func _open_sides(s: int) -> int:
+	## How many of the six neighbours of grid point `s` are air (the ground
+	## below the bottom row doesn't count).
+	var n := 0
+	if f[s - 1] <= 0.5:
+		n += 1
+	if f[s + 1] <= 0.5:
+		n += 1
+	if f[s - px] <= 0.5:
+		n += 1
+	if f[s + px] <= 0.5:
+		n += 1
+	if s + plane >= f.size() or f[s + plane] <= 0.5:
+		n += 1
+	if s >= plane and f[s - plane] <= 0.5:
+		n += 1
+	return n
 
 
 # =====================================================================================

@@ -76,14 +76,15 @@ iOS comes later through Codemagic (Godot workflow). Nothing in the code is Andro
 | 11 buried finds frozen at fixed depths (mitten, snowmobile, mammoth, 1970s caveman, dinosaur egg...). They melt out, sell for a burst of water, and stay in the world | `World._place_finds()`, `Balance.DISCOVERIES` |
 | A village frozen inside the glacier. The church spire pokes out of the top as a hint | `World._build_village()` |
 | The valley greens up and flowers bloom where the ice is gone; villagers come out at the end | `World._update_slow()` |
-| Offline melting: helpers keep working at 25% for up to 4 h, with "watch an ad to double it" | `GameState.check_offline()` |
+| Loose ice melts by itself: bits left floating, and small chunks on the ground (under about 4 m³), shrink away over a few seconds, corners first, and still pay out | `IceField._melt_floating()` |
+| No "while you were away" earnings: it's a game you play in a sitting, so nothing melts while it's closed | |
 | Rewarded ad: 2x heat for 5 min (stacks to 15). IAP: Remove Ads + permanent 2x, Golden Hair Dryer, Restore | HUD button, the catalogue in the shed |
 | Light interstitials: only when leaving the shed, after 15% of the ice is gone, at most every 4 min, never with Remove Ads | `Monetization.maybe_show_interstitial()` |
 | Ending with a stats screen, then walk around the village or melt a new glacier | `Hud.show_ending()` |
 | Short onboarding hints the first time | `World._update_coach()` |
 | Autosave every 10s and when the app is backgrounded (`user://save3d.json`), glacier included | `GameState` |
 
-**Developer menu:** when you run from the editor, and in exports tagged `playtest` (the web build), the end of the **catalogue** (the book on the table inside the shed door) has free meltwater, a x10/x100 melting speed toggle, "simulate 2h away", "melt everything" and "start over". Other release exports hide it. Remove `playtest` from the Web preset's `custom_features` before a public launch.
+**Developer menu:** when you run from the editor, and in exports tagged `playtest` (the web build), the end of the **catalogue** (the book on the table inside the shed door) has free meltwater, a x10/x100 melting speed toggle, "melt everything" and "start over". Other release exports hide it. Remove `playtest` from the Web preset's `custom_features` before a public launch.
 
 ## Project layout
 
@@ -93,7 +94,7 @@ export_presets.cfg       Web (playtest) and Android export presets
 .github/workflows/web.yml  builds + publishes the phone-playable web version
 scenes/world.tscn        the only scene; everything is built in code
 scripts/balance.gd       ALL tunable numbers: layers, tools, upgrades, helpers, finds, ad rules
-scripts/game_state.gd    autoload: economy, shed purchases, offline, save/load
+scripts/game_state.gd    autoload: economy, shed purchases, save/load
 scripts/levels.gd        level descriptions: glacier shape, crevasses, valley, stream
 scripts/world.gd         builds the valley (village, finds) and wires everything up
 scripts/shed.gd          the walk-in shed: building, sections, what you look at and buy
@@ -134,7 +135,7 @@ To go live:
 1. Install the plugins. For ads, use the **Poing Studios Godot AdMob plugin**. For purchases, use the official **GodotGooglePlayBilling** plugin (Android) and an iOS StoreKit plugin later. If you want one purchase API across both stores, RevenueCat has a Godot community plugin too.
 2. Create `scripts/monetization/admob_billing_provider.gd` that `extends MonetizationProvider`. Implement `initialize`, `show_rewarded`, `show_interstitial`, `purchase`, `restore_purchases` and `price_string`, and emit the matching signals.
 3. Return your new provider from `_create_provider()` in `scripts/monetization/monetization.gd`.
-4. Create the same IDs in the store consoles: products `remove_ads_2x` and `golden_hair_dryer` (both non-consumable), and rewarded placements `boost_2x_heat` and `offline_double`.
+4. Create the same IDs in the store consoles: products `remove_ads_2x` and `golden_hair_dryer` (both non-consumable), and the rewarded placement `boost_2x_heat`.
 
 No game code changes beyond that.
 

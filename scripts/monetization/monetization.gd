@@ -14,7 +14,6 @@ signal purchase_error(product_id: String, reason: String)
 
 # Rewarded ad placements (use these as AdMob ad unit keys too).
 const PLACEMENT_BOOST := "boost_2x_heat"
-const PLACEMENT_OFFLINE_DOUBLE := "offline_double"
 
 # Store product ids (create the same ids in Play Console / App Store Connect).
 const PRODUCT_REMOVE_ADS_2X := "remove_ads_2x"      # non-consumable, $2.99
