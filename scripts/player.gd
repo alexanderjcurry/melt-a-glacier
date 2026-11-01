@@ -11,6 +11,7 @@ const GRAVITY := 18.0
 const STEP_HEIGHT := 0.5      # walks up ledges this high without jumping
 const WORLD_LAYER := 1        # ground, houses, the shed, rocks, trees
 const ICE_LAYER := 2
+const NOZZLE := Vector3(0.24, -0.185, -0.64)   # the tool's nozzle, from the camera
 
 var grid: IceField                  # the glacier you're melting
 var grids: Array = []               # every glacier (you bump into whatever's left of any of them)
@@ -41,7 +42,7 @@ var _tool_holder: Node3D
 var _tool_model: Node3D
 var _shown_tool := -1
 var _shown_gold := false
-var _flame: CPUParticles3D
+var _fx: ToolFx                     # what comes out of the tool (each tool has its own look)
 var _steam: CPUParticles3D
 var _drips: CPUParticles3D
 var _jet: CPUParticles3D
@@ -80,16 +81,8 @@ func _ready() -> void:
 	_tool_holder.position = Vector3(0.24, -0.2, -0.45)
 	camera.add_child(_tool_holder)
 
-	_flame = _make_particles(Color(1.0, 0.7, 0.25, 1.0), Color(1.0, 0.3, 0.05, 0.0), 0.22, 70)
-	_flame.direction = Vector3(0, 0, -1)
-	_flame.spread = 7.0
-	_flame.gravity = Vector3(0, 1.0, 0)
-	_flame.initial_velocity_min = 9.0
-	_flame.initial_velocity_max = 12.0
-	_flame.lifetime = 0.35
-	_flame.position = Vector3(0.24, -0.185, -0.64)
-	_flame.local_coords = false
-	camera.add_child(_flame)
+	_fx = ToolFx.new()
+	add_child(_fx)
 
 	_steam = _make_particles(Color(1, 1, 1, 0.75), Color(1, 1, 1, 0.0), 0.35, 40)
 	_steam.direction = Vector3(0, 1, 0)
@@ -363,15 +356,13 @@ func _update_tool(delta: float) -> void:
 	var reach := GameState.tool_range()
 	target = ray(reach)
 	var active := melting and input_enabled and not GameState.has_won
-	_flame.emitting = active
+	var aim_point: Vector3 = target.pos if target.hit else camera.global_position + aim_dir() * reach
+	_fx.update(active, camera.global_transform * NOZZLE, aim_point, target.hit,
+		target.normal if target.hit else -aim_dir(), delta)
 	if active:
-		var dist: float = target.dist if target.hit else reach
-		_flame.lifetime = clampf(dist / 10.5, 0.06, 0.6)
-		var aim_point: Vector3 = target.pos if target.hit else camera.global_position + aim_dir() * reach
-		if _flame.global_position.distance_to(aim_point) > 0.3:
-			_flame.look_at(aim_point)
 		_kick = 0.02 + randf() * 0.015
 	var working: bool = active and target.hit
+	var radius := GameState.tool_radius()
 	if working:
 		var normal: Vector3 = target.normal
 		var g: IceField = target.grid
@@ -381,12 +372,14 @@ func _update_tool(delta: float) -> void:
 		g.damage_sphere(target.pos - normal * 0.2, GameState.tool_radius(), GameState.tool_power() * delta)
 		_steam.global_position = target.pos + normal * 0.2
 		_drips.global_position = target.pos + normal * 0.1
+		_steam.emission_sphere_radius = 0.15 + radius * 0.25   # a wider nozzle steams a wider patch
+		_drips.emission_sphere_radius = 0.15 + radius * 0.25
 		_heat_pos = target.pos
 	_steam.emitting = working
 	_drips.emitting = working
 	heat = move_toward(heat, 1.0 if working else 0.0, delta * (5.0 if working else 2.0))
 	if _heat_grid != null:
-		_heat_grid.set_heat(_heat_pos, heat)
+		_heat_grid.set_heat(_heat_pos, heat, radius, ToolFx.glow_color(GameState.tool_index))
 
 
 func _build_tool_model() -> void:

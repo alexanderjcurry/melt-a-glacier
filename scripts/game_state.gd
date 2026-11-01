@@ -135,14 +135,9 @@ func sell_mult() -> float:
 	return upgrade_mult("sell")
 
 
-func _stage_entry(list: Array) -> float:
-	return float(list[clampi(stage, 0, list.size() - 1)])
-
-
 func helper_each(i: int) -> float:
-	## hp per second from one helper of type i. The lake crew is much
-	## stronger (and pricier) than the village crew.
-	return float(Balance.HELPERS[i].power) * _stage_entry(Balance.HELPER_STAGE_POWER) * global_mult() * debug_speed
+	## hp per second from one helper of type i (or one of Kevin's levels).
+	return float(Balance.HELPERS[i].power) * global_mult() * debug_speed
 
 
 func helper_power(i: int) -> float:
@@ -159,7 +154,7 @@ func total_helper_power() -> float:
 
 func layer_value(g: IceField, layer: int) -> float:
 	## Meltwater for a cubic metre of this layer of that glacier.
-	return g.layer_hp(layer) * sell_mult()
+	return g.layer_hp(layer) * g.worth * sell_mult()
 
 
 func melted_cubic_metres() -> float:
@@ -266,12 +261,22 @@ func buy_upgrade(key: String) -> bool:
 
 
 func helper_cost(i: int) -> float:
-	return float(Balance.HELPERS[i].base) * _stage_entry(Balance.HELPER_STAGE_COST) * pow(Balance.HELPER_GROWTH, float(helper_counts[i]))
+	return float(Balance.HELPERS[i].base) * pow(Balance.HELPER_GROWTH, float(helper_counts[i]))
+
+
+func helper_max_level(i: int) -> int:
+	## A helper there's only one of (Kevin) levels up instead, this far. 0 = you
+	## can hire as many as you like.
+	return int(Balance.HELPERS[i].get("max_level", 0))
+
+
+func helper_maxed(i: int) -> bool:
+	return helper_max_level(i) > 0 and int(helper_counts[i]) >= helper_max_level(i)
 
 
 func buy_helper(i: int) -> bool:
 	var cost := helper_cost(i)
-	if water < cost:
+	if water < cost or helper_maxed(i):
 		return false
 	water -= cost
 	helper_counts[i] = int(helper_counts[i]) + 1

@@ -370,6 +370,27 @@ func _run() -> void:
 	check(vol0 - grid.volume_left() > 20.0 and touched > 400 and deep < touched / 10,
 		"helpers wear the ice down evenly (%.0f m³ in 20 s over %d spots, %d deeper than 1.2 m)" % [vol0 - grid.volume_left(), touched, deep])
 
+	# --- Kevin: there's one volcano. You adopt him, then buying him again levels him up.
+	# (No frames go by in here, so he doesn't throw any bombs at the tests below.)
+	gs.grant_water(1e9)
+	var kevin: Dictionary = shed.item("helper", 2)
+	check(shed.describe(kevin).action == "ADOPT", "Kevin the volcano is up for adoption")
+	for _i in 3:
+		shed.use(kevin)
+	world.helpers._update_volcano(0.0)
+	var kd: Dictionary = shed.describe(kevin)
+	var sign_text: String = world.helpers._kevin_sign.text
+	check(gs.helper_counts[2] == 3 and kd.action == "UPGRADE" and str(kd.title).contains("Lv 3")
+		and sign_text.contains("Lv 3") and (kevin.price as Label3D).text.begins_with("Lv 3"),
+		"buying him again levels him up (%s; his sign says %s)" % [kd.title, sign_text])
+	var swarm = world.helpers
+	check(swarm.bomb_interval(3) < swarm.bomb_interval(1) and swarm.bomb_scale(3) > swarm.bomb_scale(1),
+		"each level throws bigger bombs, more often")
+	gs.helper_counts[2] = gs.helper_max_level(2)
+	check(shed.describe(kevin).action == "MAXED" and not gs.buy_helper(2), "and he tops out at level %d" % gs.helper_max_level(2))
+	gs.helper_counts[2] = 0
+	world.helpers._update_volcano(0.0)   # (back to no Kevin for the rest of the test)
+
 	# --- Ice left floating in the air melts away by itself, slowly.
 	grid.find_floating_now()   # (first let any crumbs the helpers left melt)
 	for _i in 60:
@@ -472,6 +493,8 @@ func _run() -> void:
 	var won := [false]
 	gs.won.connect(func(): won[0] = true)
 	var helpers_before: int = world.helpers._walkers.size()
+	var tool_before: int = gs.tool_index
+	var upgrades_before: Dictionary = gs.upgrade_levels.duplicate()
 	grid.melt_everything()
 	await _frames(2)
 	var lake = world.glaciers[1]
@@ -479,7 +502,10 @@ func _run() -> void:
 	check(world._villagers[0].visible, "the villagers came out")
 	check(gs.helper_counts[0] == 0 and world.helpers._walkers.is_empty() and world.helpers._retired.size() == mini(helpers_before, 14),
 		"the helpers retired (%d partying) and you hire a new crew" % world.helpers._retired.size())
-	check(gs.helper_cost(0) > 100.0 * float(Balance.HELPERS[0].base), "the lake crew costs more (%s)" % Fmt.num(gs.helper_cost(0)))
+	check(gs.helper_cost(0) == float(Balance.HELPERS[0].base) and gs.helper_cost(2) == float(Balance.HELPERS[2].base),
+		"the new crew costs what the first one did (a penguin is 💧 %s again)" % Fmt.num(gs.helper_cost(0)))
+	check(gs.tool_index == tool_before and tool_before > 0 and gs.upgrade_levels == upgrades_before and int(gs.upgrade_levels.heat) >= 1,
+		"your tools and upgrades come with you (%s, heat Lv %d)" % [Balance.TOOLS[gs.tool_index].name, int(gs.upgrade_levels.heat)])
 	check(world.hud.popups.get_child_count() > 0, "a popup says the village is free")
 	for c in world.hud.popups.get_children():
 		c.queue_free()

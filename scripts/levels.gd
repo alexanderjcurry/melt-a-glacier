@@ -58,6 +58,7 @@ const VALLEY := {
 			"bumps": 0.7,
 			"layers": "lake",
 			"layer_depth": 1.4,
+			"worth": 2.0,               # its ice sells for twice as much per hp (see IceField.worth)
 			"finds_box": [Vector2(-50.0, 40.0), Vector2(50.0, 92.0)],
 			"crevasses": [
 				{"z": 52.0, "bow": 3.0, "depth": 4.0, "width": 1.2, "x0": -34.0, "x1": -6.0},

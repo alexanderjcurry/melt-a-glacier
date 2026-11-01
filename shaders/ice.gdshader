@@ -10,6 +10,8 @@ render_mode diffuse_burley, specular_schlick_ggx;
 uniform sampler2D detail_tex : filter_linear_mipmap, repeat_enable;
 uniform vec3 heat_pos = vec3(0.0, -100.0, 0.0);
 uniform float heat_amount = 0.0;
+uniform float heat_radius = 0.9;                       // the tool's heat zone, metres
+uniform vec3 heat_color = vec3(1.0, 0.45, 0.12);       // each tool glows its own colour
 uniform float glow = 0.0;
 
 varying vec3 wpos;
@@ -70,8 +72,8 @@ void fragment() {
 
 	// The heat: wet and glossy around where it lands, glowing at the centre.
 	float hd = length(wpos - heat_pos);
-	float wet = heat_amount * (1.0 - smoothstep(0.3, 2.0, hd));
-	float hot = heat_amount * (1.0 - smoothstep(0.0, 0.9, hd));
+	float wet = heat_amount * (1.0 - smoothstep(0.33 * heat_radius, 2.2 * heat_radius, hd));
+	float hot = heat_amount * (1.0 - smoothstep(0.0, heat_radius, hd));
 	col = mix(col, col * vec3(0.78, 0.88, 1.0), wet * 0.5);
 
 	ALBEDO = col;
@@ -83,5 +85,5 @@ void fragment() {
 	float fres = pow(1.0 - clamp(dot(NORMAL, VIEW), 0.0, 1.0), 3.0);
 	vec3 sss = vec3(0.1, 0.35, 0.6) * fres * 0.18 * (1.0 - snow);
 	float sparkle = smoothstep(0.8, 0.86, fine) * snow * step(0.6, fract(dot(VIEW, vec3(13.0, 7.0, 11.0)) + d.r * 3.0));
-	EMISSION = sss + vec3(1.0, 0.45, 0.12) * hot * hot * 0.55 + vec3(1.0, 0.72, 0.3) * glow * 0.55 + vec3(sparkle) * 0.3;
+	EMISSION = sss + heat_color * hot * hot * 0.55 + vec3(1.0, 0.72, 0.3) * glow * 0.55 + vec3(sparkle) * 0.3;
 }

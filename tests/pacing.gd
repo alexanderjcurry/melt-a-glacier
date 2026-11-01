@@ -6,7 +6,9 @@ extends SceneTree
 ## The default player keeps the beam on the ice most of the time and goes to the
 ## shed about once a minute. "casual" is slower: more looking around, more shed
 ## browsing. Real first runs land somewhere between the two.
-## Add "seed=N" for a different roll of the dice.
+## Add "seed=N" for a different roll of the dice. For tuning the lake without
+## editing files: "worth=X" (what its ice sells for) and "lakehp=K" (x the hp of
+## its layers from Jade Ice down).
 ## Variables stay untyped: this compiles before the GameState autoload exists.
 
 const DT := 0.05                 # must match --fixed-fps 20
@@ -30,6 +32,8 @@ var stage_start := 0.0
 var from_tool := 0.0
 var from_finds := 0.0
 var last_report := {"t": 0.0, "tool": 0.0, "finds": 0.0, "all": 0.0}
+var lake_worth := -1.0
+var lake_hp := 1.0
 
 
 func _initialize() -> void:
@@ -41,6 +45,10 @@ func _initialize() -> void:
 			dwell_max = 1.5
 		elif a.begins_with("seed="):
 			rng.seed = int(a.substr(5))
+		elif a.begins_with("worth="):
+			lake_worth = float(a.substr(6))
+		elif a.begins_with("lakehp="):
+			lake_hp = float(a.substr(7))
 	if rng.seed == 0:
 		rng.seed = 7
 	_run.call_deferred()
@@ -77,16 +85,24 @@ func _run() -> void:
 	var world = load("res://scenes/world.tscn").instantiate()
 	root.add_child(world)
 	await process_frame
+	var lake = gs.grids[gs.grids.size() - 1]
+	if lake_worth > 0.0:
+		lake.worth = lake_worth
+	for l in range(4, lake._layer_hp.size()):
+		lake._layer_hp[l] *= lake_hp
 	for g in gs.grids.size():
 		var field = gs.grids[g]
 		var finds := 0.0
 		for d in Balance.finds_in(g):
 			finds += float(Balance.DISCOVERIES[d].value)
-		_note("%s: %d m3 of ice, %s to melt (water at x1 sell), finds worth %s" % [
-			field.spec.title, field.volume_left(), _n(_work(field)), _n(finds)])
+		_note("%s: %d m3 of ice, %s hp x m3 to melt (water x%.1f at x1 sell), finds worth %s" % [
+			field.spec.title, field.volume_left(), _n(_work(field)), field.worth, _n(finds)])
 	gs.discovered_item.connect(func(i, value):
 		from_finds += value
 		_note("found %s (+%s)" % [Balance.DISCOVERIES[i].name, _n(value)]))
+	if world.get("fleet") != null:
+		world.fleet.ship_freed.connect(func(n, bounty):
+			_note("freed %s (+%s)" % [n, _n(bounty)]))
 	gs.stage_changed.connect(func(s):
 		_note("=== %s done in %.1f min. On to %s ===" % [grid.spec.title, (t - stage_start) / 60.0, gs.grids[s].spec.title])
 		stage_start = t)
@@ -188,7 +204,7 @@ func _shop() -> void:
 				best = key
 				best_cost = gs.upgrade_cost(key)
 		for i in Balance.HELPERS.size():
-			if gs.helper_cost(i) < best_cost:
+			if not gs.helper_maxed(i) and gs.helper_cost(i) < best_cost:
 				best = str(i)
 				best_cost = gs.helper_cost(i)
 		if best == "" or best_cost > gs.water or best_cost > cap:

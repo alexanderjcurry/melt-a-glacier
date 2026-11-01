@@ -14,7 +14,7 @@ extends Node3D
 ## mesher never needs bounds checks. Under y = 0 the bottom row repeats, so
 ## the ice simply carries on into the ground with no bottom face.
 
-signal ice_melted(at: Vector3, volume: float, value: float)   # m³ that just turned to water, and their hp x m³
+signal ice_melted(at: Vector3, volume: float, value: float)   # m³ that just turned to water, and their hp x m³ x worth
 signal find_exposed(find: int)
 
 const CH := 8                    # chunk size in cells, along x and z
@@ -38,6 +38,7 @@ var res := 0.5                   # metres between grid points (big glaciers use 
 var point_volume := 0.125        # m³ of ice per grid point
 var layer_depth := 1.0           # metres of ice per layer, counted from the original surface
 var layers: Array = []           # Balance.LAYER_SETS[spec.layers]: name, hp, colour, deepest last
+var worth := 1.0                 # meltwater per hp x m³ (the frozen lake's ice sells for more)
 var collide := true              # build collision shapes (off while the glacier is out of reach)
 var origin := Vector3.ZERO       # world position of grid point (0, 0, 0)
 var nx := 0
@@ -105,6 +106,7 @@ func generate(p_spec: Dictionary, p_seed: int, carve: Array = [], mesh_now: bool
 	_small_points = int(round(SMALL_CHUNK_VOLUME / point_volume))
 	layer_depth = float(spec.get("layer_depth", 1.0))
 	layers = Balance.LAYER_SETS[spec.get("layers", "valley")]
+	worth = float(spec.get("worth", 1.0))
 	var mn: Vector3 = spec.field_min
 	var mx: Vector3 = spec.field_max
 	origin = mn
@@ -632,7 +634,7 @@ func damage_sphere(center: Vector3, radius: float, amount: float) -> int:
 	if melted > 0:
 		remaining -= melted
 		_scan_dirty = true
-		ice_melted.emit(center, melted * point_volume, hp_sum * point_volume)
+		ice_melted.emit(center, melted * point_volume, hp_sum * point_volume * worth)
 	for d in found:
 		_expose(d)
 	return melted
@@ -657,7 +659,7 @@ func melt_everything() -> void:
 	for ci in _chunks.size():
 		_dirty[ci] = true
 	if melted > 0:
-		ice_melted.emit(Vector3.INF, melted * point_volume, hp_sum * point_volume)
+		ice_melted.emit(Vector3.INF, melted * point_volume, hp_sum * point_volume * worth)
 	for d in found:
 		_expose(d)
 
@@ -674,13 +676,16 @@ func _touch(i0: int, i1: int, k0: int, k1: int) -> void:
 			_dirty[cx + cz * ncx] = true
 
 
-func set_heat(at: Vector3, amount: float) -> void:
-	## Where the player's tool is hitting: the shader makes that spot glow and look wet.
+func set_heat(at: Vector3, amount: float, radius: float = 0.9, color: Color = Color(1.0, 0.45, 0.12)) -> void:
+	## Where the player's tool is hitting: the shader makes that spot glow (as
+	## big as the tool's heat zone, in the tool's colour) and look wet.
 	if material == null:
 		return
 	_heat = amount
 	material.set_shader_parameter("heat_pos", at)
 	material.set_shader_parameter("heat_amount", amount)
+	material.set_shader_parameter("heat_radius", radius)
+	material.set_shader_parameter("heat_color", Vector3(color.r, color.g, color.b))
 
 
 func set_collide(on: bool) -> void:
@@ -984,7 +989,7 @@ func _melt_floating(dt: float) -> void:
 		_drips.emitting = false
 	if melted > 0:
 		remaining -= melted
-		ice_melted.emit(at / float(melted), melted * point_volume, hp_sum * point_volume)
+		ice_melted.emit(at / float(melted), melted * point_volume, hp_sum * point_volume * worth)
 	for d in found:
 		_expose(d)
 

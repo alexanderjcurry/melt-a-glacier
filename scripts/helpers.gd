@@ -24,7 +24,8 @@ const MELT_PULSE := 0.25               # heat is saved up and put down this ofte
 # of heat `a` with radius r melts about WORK x a x r³ of that (IceField.damage_sphere):
 const WALK_WORK := 2.76                # ball centred just above the surface
 const BOMB_WORK := 4.3                 # ball centred 0.4 m into the ice
-const BOMB_RADIUS := 1.7
+const BOMB_RADIUS := 1.7               # at level 1; Kevin's bombs grow as he levels up
+const BOMB_GROW := 0.05                # this much bigger per level
 const DROP := 0.6                      # won't step down more than this per 0.6 m (into a hole)
 const CLIMB := 1.1                     # or climb more than this
 
@@ -38,6 +39,8 @@ var _bomb_timer := 0.0
 var _rng := RandomNumberGenerator.new()
 var _volcano: Node3D
 var _smoke: CPUParticles3D
+var _kevin_sign: Label3D
+var _kevin_level := -1                 # what his sign and smoke show
 var _spawned := 0
 
 
@@ -64,7 +67,7 @@ func _process(delta: float) -> void:
 # --- Walkers --------------------------------------------------------------------------------
 func retire() -> void:
 	## The glacier's gone: this crew stops working and parties where they are
-	## (a few of them, anyway). Kevin dozes off until you adopt him again.
+	## (a few of them, anyway). Kevin dozes off until you wake him up again.
 	for w in _walkers:
 		(w.fx as CPUParticles3D).emitting = false
 		if _retired.size() < MAX_RETIRED:
@@ -286,30 +289,54 @@ func _pose(w: Dictionary, walk: float, work: float, party: bool) -> void:
 
 
 # --- Volcano ------------------------------------------------------------------------------
+static func bomb_interval(level: int) -> float:
+	## Seconds between Kevin's lava bombs: more often as he levels up.
+	return clampf(2.4 / sqrt(float(maxi(level, 1))), 0.35, 2.4)
+
+
+static func bomb_scale(level: int) -> float:
+	## How big his bombs (and their craters) are, x the size at level 1.
+	return 1.0 + BOMB_GROW * float(maxi(level, 1) - 1)
+
+
 func _update_volcano(delta: float) -> void:
-	var count := int(GameState.helper_counts[VOLCANO_TYPE])
-	if count <= 0:
+	var level := int(GameState.helper_counts[VOLCANO_TYPE])   # there's one Kevin; buying him again levels him up
+	if level <= 0:
 		if _volcano != null and GameState.stage == 0:   # (after a fresh start)
 			_volcano.queue_free()
 			_volcano = null
+			_kevin_level = -1
 		elif _volcano != null:
-			_look_at_player()   # retired, but still watching you
+			_show_kevin_level(0)
+			_look_at_player()   # dozing after the village, but still watching you
 		return
 	if _volcano == null:
 		_build_volcano()
 	if not _smoke.emitting:
 		_smoke.emitting = true
+	_show_kevin_level(level)
 	_look_at_player()
 	if GameState.has_won or grid.remaining <= 0:
 		return
-	# More volcanoes = more frequent bombs, same damage per second each.
-	var interval := clampf(2.4 / sqrt(float(count)), 0.35, 2.4)
+	# Each level: bigger bombs, more often. Together they melt his power per second.
+	var interval := bomb_interval(level)
 	_bomb_timer += delta
 	if _bomb_timer >= interval:
 		_bomb_timer = 0.0
 		var p := grid.random_surface_point(_rng)
 		if p != Vector3.INF:
-			_launch_bomb(p, GameState.helper_power(VOLCANO_TYPE) * interval / (BOMB_WORK * pow(BOMB_RADIUS, 3.0)))
+			var size := bomb_scale(level)
+			_launch_bomb(p, GameState.helper_power(VOLCANO_TYPE) * interval / (BOMB_WORK * pow(BOMB_RADIUS * size, 3.0)), size)
+
+
+func _show_kevin_level(level: int) -> void:
+	## His sign says his level, and he smokes more the hotter he gets.
+	if level == _kevin_level or _volcano == null:
+		return
+	_kevin_level = level
+	_kevin_sign.text = "🌋 Kevin · Lv %d" % level if level > 0 else "🌋 Kevin 💤"
+	if level > 0:
+		_smoke.amount = 26 + 4 * level
 
 
 func _build_volcano() -> void:
@@ -332,6 +359,7 @@ func _build_volcano() -> void:
 	_smoke.emitting = true
 	var label := Label3D.new()
 	label.text = "🌋 Kevin"
+	_kevin_sign = label
 	label.font_size = 96
 	label.pixel_size = 0.03
 	label.outline_size = 18
@@ -351,11 +379,11 @@ func _look_at_player() -> void:
 		pupil.position = pupil.position.lerp(dir.normalized() * 0.85, 0.15)
 
 
-func _launch_bomb(to: Vector3, damage: float) -> void:
+func _launch_bomb(to: Vector3, damage: float, size: float = 1.0) -> void:
 	var node := MeshInstance3D.new()
 	var sm := SphereMesh.new()
-	sm.radius = 0.45
-	sm.height = 0.9
+	sm.radius = 0.45 * size
+	sm.height = 0.9 * size
 	sm.radial_segments = 10
 	sm.rings = 6
 	node.mesh = sm
@@ -375,7 +403,7 @@ func _launch_bomb(to: Vector3, damage: float) -> void:
 	node.position = from
 	var far := from.distance_to(to)   # the lake is a long way off: higher, slower lobs
 	_bombs.append({"node": node, "from": from, "to": to, "t": 0.0, "dur": clampf(far / 28.0, 1.8, 5.0),
-		"arc": clampf(far * 0.3, 14.0, 40.0), "damage": damage})
+		"arc": clampf(far * 0.3, 14.0, 40.0), "damage": damage, "size": size})
 
 
 func _update_bombs(delta: float) -> void:
@@ -389,21 +417,22 @@ func _update_bombs(delta: float) -> void:
 		var node: MeshInstance3D = b.node
 		node.position = p
 		if k >= 1.0:
-			grid.damage_sphere(to + Vector3(0, -0.4, 0), BOMB_RADIUS, b.damage)
-			_puff(to)
+			var size: float = b.size
+			grid.damage_sphere(to + Vector3(0, -0.4 * size, 0), BOMB_RADIUS * size, b.damage)
+			_puff(to, size)
 			node.queue_free()
 			_bombs.erase(b)
 
 
-func _puff(at: Vector3) -> void:
-	var p := _make_fx(Color(1, 1, 1, 0.8), Color(1, 1, 1, 0.0), 0.6, 24, 1.2)
+func _puff(at: Vector3, size: float = 1.0) -> void:
+	var p := _make_fx(Color(1, 1, 1, 0.8), Color(1, 1, 1, 0.0), 0.6 * size, int(24 * size), 1.2)
 	p.one_shot = true
 	p.explosiveness = 0.9
 	p.direction = Vector3(0, 1, 0)
 	p.spread = 60.0
 	p.gravity = Vector3(0, 2.0, 0)
-	p.initial_velocity_min = 1.0
-	p.initial_velocity_max = 3.0
+	p.initial_velocity_min = 1.0 * size
+	p.initial_velocity_max = 3.0 * size
 	p.position = at
 	add_child(p)
 	p.emitting = true

@@ -6,8 +6,9 @@ dig into it. Meltwater is money: spend it at the shed on hotter tools,
 upgrades and helpers (penguins with tiny torches, a sauna crew, an adopted
 volcano called Kevin). Frozen junk melts out as you dig, and at the very bottom
 there's a whole village. Free the village and the gate in the fence opens: the
-whole lake beyond it froze solid, and it's a far bigger, harder glacier. Your
-helpers retire to the village, you hire a new crew, and when the last of the
+whole lake beyond it froze solid, and it's a far bigger, harder glacier (its ice
+sells for twice as much). You keep your tools and upgrades; your helpers retire
+to the village and you hire a new crew at the same prices. When the last of the
 lake ice is gone summer comes back. A run takes roughly 35 to 70 minutes.
 
 ## Play it on your phone (iPhone or Android)
@@ -69,14 +70,14 @@ iOS comes later through Codemagic (Godot workflow). Nothing in the code is Andro
 |---|---|
 | Two glaciers, melted in order. The village glacier (about 7,300 m³, a 0.5 m grid) and then the frozen lake (about 62,000 m³, a 1 m grid). Each is smooth, diggable ice stored as a density field and re-meshed in 8x8 chunks as you melt it (surface nets). 10 layers by depth each, from Fresh Snow to The Last Chunk in the village and from Lake Snow to The Lake's Heart (turquoise, jade, black, violet) in the lake: deeper ice is harder and worth more. Crevasses, snow cover, carved ice and a wet glow where the heat lands are drawn by `shaders/ice.gdshader` | `scripts/ice_field.gd`, `Balance.LAYER_SETS` |
 | The level: each glacier's shape, its crevasses and the valley around them are one dictionary, so more levels (or more glaciers in one level) are more dictionaries | `scripts/levels.gd` |
-| A fence across the valley keeps you off the lake. Its gate is locked until the village is free, then swings open. Your helpers retire and party in the village, and the lake crew you hire is stronger and pricier. Tools and upgrades carry over | `World._build_fence()`, `GameState.check_win()` |
+| A fence across the valley keeps you off the lake. Its gate is locked until the village is free, then swings open. Your helpers retire and party in the village, and you hire a new crew for the lake at the same prices. Tools and upgrades carry over | `World._build_fence()`, `GameState.check_win()` |
 | First-person walking (CharacterBody3D on the ice's collision mesh), step-up, a jetpack (hold JUMP, fuel refills on landing) and a respawn button | `scripts/player.gd` |
 | The valley: generated mountains with rock and snow, a cloudy sky, the lake and a meltwater stream, pine forest, boulders | `scripts/scenery.gd`, `shaders/` |
-| The heat tool: aim with the crosshair, hold to melt a ball of ice, flame and steam effects | `Player._update_tool()` |
+| The heat tool: aim with the crosshair, hold to melt a ball of ice. Each tool has its own spray (wavy hot air, a warm lamp glow, a blue torch flame, rolling fire, an arc of lava, a sunbeam from space), and upgrades show in it: Wider Nozzle makes it wider where it lands, Longer Reach makes it go further, Heat Output makes it brighter | `Player._update_tool()`, `scripts/tool_fx.gd`, `shaders/heat_beam.gdshader` |
 | The shed is a walk-in store: tools hang on the pegboard, upgrades sit on the workbench, helpers wait in the hiring corner, finds go on the shelf by the door, and the catalogue on the table has the boost and purchases. Look at anything for a paper price card, then buy it where it stands | `scripts/shed.gd`, `Hud.set_shop_info()` |
 | 6 tools bought in order at the shed: Hair Dryer, Heat Lamp, Blowtorch, Flamethrower, Lava Hose, Orbital Mirror (the same models you hold) | `Balance.TOOLS`, `scripts/props.gd` |
 | 5 upgrades: Heat Output, Wider Nozzle, Longer Reach, Steam Sell, Crampon Boots | `Balance.UPGRADES` |
-| Helpers (3D models built in code): penguins with tiny torches and the sauna crew walk on the ice melting it, Kevin the volcano lobs lava bombs and watches you | `scripts/helpers.gd`, `scripts/creatures.gd`, `Balance.HELPERS` |
+| Helpers (3D models built in code): penguins with tiny torches and the sauna crew walk on the ice melting it, Kevin the volcano lobs lava bombs and watches you. There's one Kevin: you adopt him, then level him up (to 15) for bigger bombs, more often | `scripts/helpers.gd`, `scripts/creatures.gd`, `Balance.HELPERS` |
 | 18 buried finds frozen at fixed depths: 11 in the village glacier (mitten, snowmobile, mammoth, 1970s caveman, dinosaur egg...) and 7 in the lake (ice skater, pirate treasure, a whale, a lake monster, a UFO, the sun's lost ray). They melt out, sell for a burst of water, and stay in the world | `World._place_finds()`, `Balance.DISCOVERIES` |
 | A village frozen inside the glacier. The church spire pokes out of the top as a hint | `World._build_village()` |
 | The valley greens up and flowers bloom where the ice is gone; villagers come out at the end | `World._update_slow()` |
@@ -106,6 +107,7 @@ scripts/props.gd         models of the six tools and the upgrade items
 scripts/scenery.gd       mountains, sky, lake, stream, forest, boulders
 scripts/ice_field.gd     the glacier: density field, meshing, melting, collision, save string
 scripts/player.gd        first-person movement, jetpack, respawn, the heat tool
+scripts/tool_fx.gd       what comes out of each tool (spray, glow, splash), sized by your upgrades
 scripts/creatures.gd     3D models of the helpers (penguin, sauna crew, Kevin)
 scripts/mesh_kit.gd      tiny modelling kit (ellipsoids, cylinders, boxes) for the models
 scripts/touch_controls.gd  phone controls (multi-touch stick, look, melt, jump)
@@ -115,7 +117,7 @@ scripts/ui_theme.gd      shared UI look, emoji font, particle texture
 scripts/shop_row.gd      one catalogue row
 scripts/fmt.gd           1.23K / 4.5M number formatting
 scripts/monetization/    ad + IAP interface, stub provider, autoload facade
-shaders/                 ice, mountain rock and snow, sky, water, shed wood
+shaders/                 ice, mountain rock and snow, sky, water, shed wood, the tools' heat beam
 fonts/                   subset Noto Color Emoji (the placeholder art) + license
 tests/smoke_test.gd      headless test: godot --headless -s res://tests/smoke_test.gd
 tests/screenshots.gd     renders screenshots of key moments (see the top of the file)

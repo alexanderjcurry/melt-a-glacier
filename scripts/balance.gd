@@ -87,20 +87,21 @@ const UPGRADES = [
 # Helpers melt on their own. Penguins and the sauna crew waddle around on the
 # ice; the volcano lobs lava bombs. power = hp x m³ of ice each one melts per
 # second (water per second at x1 sell), less on soft snow where heat is wasted.
+# There's only one Kevin: you adopt him, then each time you buy him again he
+# goes up a level (to max_level) and throws bigger lava bombs, more often.
+# Every level adds `power`, so the count in GameState.helper_counts is his level.
 const HELPER_GROWTH := 1.2
 const HELPERS = [
 	{"key": "penguin", "name": "Penguin with Tiny Torch", "icon": "🐧", "power": 0.5, "base": 30.0,
 		"desc": "Waddles around melting the surface."},
 	{"key": "sauna", "name": "Sauna Crew", "icon": "🧖", "power": 6.0, "base": 600.0,
 		"desc": "Very relaxed. Very hot."},
-	{"key": "volcano", "name": "Adopted Volcano", "icon": "🌋", "power": 150.0, "base": 25000.0,
-		"desc": "Lobs lava bombs at the ice. You named it Kevin."},
+	{"key": "volcano", "name": "Kevin the Volcano", "icon": "🌋", "power": 150.0, "base": 25000.0, "max_level": 15,
+		"desc": "Your very own volcano. He lobs lava bombs at the ice."},
 ]
 const MAX_VISIBLE_WALKERS := 18   # per helper type; more helpers just work harder
-# When the village is free your helpers retire, and the crew you hire for the
-# frozen lake is this many times stronger, and pricier (one entry per glacier).
-const HELPER_STAGE_POWER := [1.0, 200.0]
-const HELPER_STAGE_COST := [1.0, 600.0]
+# When the village is free your helpers retire and you hire a new crew for the
+# frozen lake, at the same prices (Alex: keep everything else the same).
 
 # How special a find is. Rarer finds get a bigger reveal (more shards, a
 # brighter flash) and their colour on the name tag, the card and the shelf.

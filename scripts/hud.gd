@@ -619,7 +619,7 @@ func set_shop_info(info: Dictionary) -> void:
 	_card_stamp.visible = price != ""
 	if _card_price.text != price:
 		_card_price.text = price
-	var buying := action == "BUY" or action == "HIRE"
+	var buying := action in ["BUY", "HIRE", "ADOPT", "UPGRADE", "WAKE UP"]
 	var stamp := Color(0.5, 0.47, 0.42)
 	if can:
 		stamp = Color(0.2, 0.52, 0.27)

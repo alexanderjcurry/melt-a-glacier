@@ -201,6 +201,8 @@ func _describe_upgrade(key: String) -> Dictionary:
 
 
 func _describe_helper(i: int) -> Dictionary:
+	if GameState.helper_max_level(i) > 0:
+		return _describe_kevin(i)
 	var h: Dictionary = Balance.HELPERS[i]
 	var n := int(GameState.helper_counts[i])
 	var cost := GameState.helper_cost(i)
@@ -208,6 +210,47 @@ func _describe_helper(i: int) -> Dictionary:
 	return {"title": "%s %s" % [h.icon, h.name],
 		"body": "%s\nMelts %s hp/s. You have %d." % [h.desc, Fmt.num(each), n],
 		"price": "💧 " + Fmt.num(cost), "can": GameState.water >= cost, "action": "HIRE"}
+
+
+func _describe_kevin(i: int) -> Dictionary:
+	## There's only one Kevin. You adopt him (or wake him up, after the village),
+	## then each time you buy him he goes up a level: bigger bombs, more often.
+	var h: Dictionary = Balance.HELPERS[i]
+	var lvl := int(GameState.helper_counts[i])
+	var cost := GameState.helper_cost(i)
+	var d := {"title": "%s %s" % [h.icon, h.name], "body": "", "price": "💧 " + Fmt.num(cost),
+		"can": GameState.water >= cost, "action": "UPGRADE"}
+	if lvl == 0:
+		if GameState.stage == 0:
+			d.body = "%s\nAdopt him, then upgrade him for bigger bombs, more often." % h.desc
+			d.action = "ADOPT"
+		else:
+			d.body = "Kevin dozed off after the village party. Wake him up to bomb\nthe frozen lake, then upgrade him again for bigger bombs."
+			d.action = "WAKE UP"
+		return d
+	d.title += " · Lv %d/%d" % [lvl, GameState.helper_max_level(i)]
+	var total := GameState.helper_power(i) / maxf(GameState.debug_speed, 0.001)
+	var now := "Right now: a bomb every %.1f s, melting %s hp/s." % [HelperSwarm.bomb_interval(lvl), Fmt.num(total)]
+	if GameState.helper_maxed(i):
+		d.body = "As hot as he gets.\n" + now
+		d.price = "MAX"
+		d.can = false
+		d.action = "MAXED"
+	else:
+		d.body = "Each level: bigger lava bombs, more often.\n" + now
+	return d
+
+
+func _hired_text(i: int) -> String:
+	var h: Dictionary = Balance.HELPERS[i]
+	if GameState.helper_max_level(i) == 0:
+		return "%s %s hired! Look for it on the ice" % [h.icon, h.name]
+	var lvl := int(GameState.helper_counts[i])
+	if lvl > 1:
+		return "%s Kevin is level %d: bigger bombs, more often!" % [h.icon, lvl]
+	if GameState.stage == 0:
+		return "%s You adopted Kevin! Watch for his lava bombs" % h.icon
+	return "%s Kevin's awake and fired up for the lake!" % h.icon
 
 
 func _glacier_slot_found(slot: int) -> bool:
@@ -270,9 +313,11 @@ func use(it: Dictionary) -> Dictionary:
 		"helper":
 			var i := int(it.id)
 			var h: Dictionary = Balance.HELPERS[i]
-			if GameState.buy_helper(i):
+			if GameState.helper_maxed(i):
+				r.text = "%s Kevin is as hot as he gets" % h.icon
+			elif GameState.buy_helper(i):
 				r.ok = true
-				r.text = "%s %s hired!%s" % [h.icon, h.name, "" if i == 2 else " Look for it on the ice"]
+				r.text = _hired_text(i)
 			else:
 				r.text = "Not enough 💧: %s more to go" % Fmt.num(GameState.helper_cost(i) - GameState.water)
 	if r.ok:
@@ -392,7 +437,12 @@ func refresh() -> void:
 				var i := int(it.id)
 				var n := int(GameState.helper_counts[i])
 				var cost := "💧 " + Fmt.num(GameState.helper_cost(i))
-				_set_text(price, cost if n == 0 else "%d hired · %s" % [n, cost], INK)
+				if GameState.helper_maxed(i):   # Kevin: one volcano that levels up
+					_set_text(price, "Lv %d · MAX" % n, GREEN_INK)
+				elif GameState.helper_max_level(i) > 0:
+					_set_text(price, cost if n == 0 else "Lv %d · %s" % [n, cost], INK)
+				else:
+					_set_text(price, cost if n == 0 else "%d hired · %s" % [n, cost], INK)
 			"find":
 				var d := int(it.id)
 				var nd := Balance.DISCOVERIES.size()
