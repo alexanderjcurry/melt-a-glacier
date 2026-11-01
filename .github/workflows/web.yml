@@ -1,0 +1,82 @@
+name: Build and publish web version
+
+# Every push to main runs the smoke test, exports the game for the web, and
+# publishes it to GitHub Pages: https://alexanderjcurry.github.io/melt-a-glacier/
+# One-time setup: repo Settings > Pages > Source: "GitHub Actions".
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+env:
+  GODOT_VERSION: "4.4.1"
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Check out
+        uses: actions/checkout@v4
+
+      - name: Restore Godot from cache
+        id: godot-cache
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/godot
+            ~/.local/share/godot/export_templates
+          key: godot-${{ env.GODOT_VERSION }}-web-v1
+
+      - name: Download Godot and the web export templates
+        if: steps.godot-cache.outputs.cache-hit != 'true'
+        run: |
+          set -euo pipefail
+          base="https://github.com/godotengine/godot/releases/download/${GODOT_VERSION}-stable"
+          templates="$HOME/.local/share/godot/export_templates/${GODOT_VERSION}.stable"
+          mkdir -p ~/godot "$templates"
+          curl -fsSL --retry 3 -o /tmp/godot.zip "$base/Godot_v${GODOT_VERSION}-stable_linux.x86_64.zip"
+          unzip -q /tmp/godot.zip -d /tmp/godot-unzip
+          mv "/tmp/godot-unzip/Godot_v${GODOT_VERSION}-stable_linux.x86_64" ~/godot/godot
+          # The full template pack is 1.2 GB; keep only the web templates.
+          curl -fsSL --retry 3 -o /tmp/templates.tpz "$base/Godot_v${GODOT_VERSION}-stable_export_templates.tpz"
+          unzip -q -j /tmp/templates.tpz 'templates/web_nothreads_*' 'templates/version.txt' -d "$templates"
+          rm -rf /tmp/godot.zip /tmp/godot-unzip /tmp/templates.tpz
+
+      - name: Import project
+        run: timeout 300 ~/godot/godot --headless --import
+
+      - name: Smoke test
+        run: timeout 300 ~/godot/godot --headless -s res://tests/smoke_test.gd
+
+      - name: Export web build
+        run: |
+          mkdir -p build/web
+          timeout 600 ~/godot/godot --headless --export-release "Web" build/web/index.html
+          test -s build/web/index.wasm
+          ls -la build/web
+
+      - name: Upload the build for Pages
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: build/web
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-24.04
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4
