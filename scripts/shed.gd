@@ -222,15 +222,16 @@ func _describe_find(d: int) -> Dictionary:
 			return {"title": "%s %s" % [gs.icon, gs.title], "body": gs.body, "price": "", "can": false, "action": ""}
 		return {"title": "🧊 ???", "body": gs.hint, "price": "", "can": false, "action": ""}
 	var info: Dictionary = Balance.DISCOVERIES[d]
+	var rarity: String = Balance.rarity(d).name
 	if GameState.discovered[d]:
-		return {"title": "%s %s" % [info.icon, info.name],
+		return {"title": "%s %s  ·  %s" % [info.icon, info.name, rarity],
 			"body": "%s\nSold for 💧 %s" % [info.flavor, Fmt.num(float(info.value) * GameState.sell_mult())],
 			"price": "", "can": false, "action": ""}
 	var layer_set: Array = Balance.LAYER_SETS[GameState.grids[int(info.glacier)].spec.layers] if not GameState.grids.is_empty() else Balance.LAYER_SETS.valley
 	var where := "Somewhere in the %s" % layer_set[int(info.layer)].name
 	if int(info.glacier) > GameState.stage:
 		where += " of the frozen lake"
-	return {"title": "🧊 Still frozen", "body": where + ".", "price": "", "can": false, "action": ""}
+	return {"title": "🧊 Still frozen  ·  %s" % rarity, "body": where + ".", "price": "", "can": false, "action": ""}
 
 
 func use(it: Dictionary) -> Dictionary:

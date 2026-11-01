@@ -48,6 +48,9 @@ var _moraine := Color(0.55, 0.46, 0.34)
 var _mats := {}
 var _find_markers := {}        # discovery index -> Node3D (see _make_find_marker)
 var _find_spots := {}          # discovery index -> where it's frozen (worked out on the fresh ice)
+var _ghosts := {}              # discovery index -> {node, mat, alpha, target}: its shadow in the ice
+var _ghost_i := 0              # the one whose ice gets checked this frame
+var _cover_dirs: Array = []    # directions _ice_cover looks along
 var _gate: Node3D              # swings open when the village is free
 var _gate_shape: CollisionShape3D
 var _gate_sign: Label3D
@@ -151,6 +154,7 @@ func _ready() -> void:
 	hud = Hud.new()
 	hud.player = player
 	hud.grid = GameState.grid
+	hud.find_hint = find_hint_at
 	add_child(hud)
 	hud.respawn_requested.connect(respawn)
 
@@ -250,6 +254,7 @@ func _process(delta: float) -> void:
 	_update_shed(delta)
 	_update_floats(delta)
 	_settle_finds(delta)
+	_update_ghosts(delta)
 	_slow_timer += delta
 	if _slow_timer >= 0.4:
 		_slow_timer = 0.0
@@ -403,6 +408,7 @@ func _place_finds() -> void:
 			marker.set_meta("glacier", g)
 			add_child(marker)
 			_find_markers[d] = marker
+			_make_ghost(d, marker)
 
 
 func _arm_finds() -> void:
@@ -417,12 +423,31 @@ func _arm_finds() -> void:
 				GameState.discover(d)
 
 
-# How big each find is (its longest side, in metres), in Balance.DISCOVERIES order.
-const FIND_SIZES := [0.6, 0.8, 0.7, 1.6, 1.8, 0.7, 1.3, 1.1, 0.8, 0.9, 0.8,
+# A find still in the ice shows through as a dark shape once the ice around it
+# gets thin, so you can see something's in there and go after it.
+const GHOST_SHOW := 2.6        # starts to show through this much ice (metres)
+const GHOST_FULL := 0.7        # darkest through this little
+const GHOST_RANGE := 18.0      # only this close to you
+const HINT_RADIUS := 2.8       # aiming at ice this close to a find gets you a hint
+
+# How big each find model is (its longest side, in metres), in models/finds.glb
+# order (Find0, Find1...; see find_model).
+const FIND_SIZES := [0.6, 0.8, 0.7, 1.6, 2.6, 0.7, 1.3, 1.1, 0.8, 0.9, 0.8,
 	1.3, 2.6, 1.0, 5.0, 3.0, 2.6, 1.6]   # the lake glacier's finds: skater .. the sun's lost ray
 
 
 static var _lake_model: ArrayMesh
+
+
+static func find_model(d: int) -> int:
+	## Which FindN model in models/finds.glb is find d (the village's finds
+	## were put in a new order when the glacier got deeper).
+	return int(Balance.DISCOVERIES[d].get("model", d))
+
+
+static func find_size(d: int) -> float:
+	var m := find_model(d)
+	return FIND_SIZES[m] if m < FIND_SIZES.size() else 0.8
 
 
 static func find_mesh(d: int) -> Mesh:
@@ -433,7 +458,7 @@ static func find_mesh(d: int) -> Mesh:
 		return _frozen_lake_model()
 	if d >= Balance.DISCOVERIES.size():
 		return Models.baked("house_0")
-	return Models.baked("finds", "Find%d" % d)
+	return Models.baked("finds", "Find%d" % find_model(d))
 
 
 static func _frozen_lake_model() -> ArrayMesh:
@@ -452,7 +477,7 @@ func _make_find_marker(d: int) -> Node3D:
 	## A find in the ice: its model (resting 0.36 m below the marker's origin,
 	## see _settle_finds), turning slowly once found, with its name above.
 	var info: Dictionary = Balance.DISCOVERIES[d]
-	var size: float = FIND_SIZES[d] if d < FIND_SIZES.size() else 0.8
+	var size := find_size(d)
 	var m := Models.fitted(find_mesh(d), size, -0.36)
 	m.rotation.y = PI + float(d) * 0.7
 	m.visible = false
@@ -462,7 +487,8 @@ func _make_find_marker(d: int) -> Node3D:
 	name_tag.pixel_size = 0.0007
 	name_tag.fixed_size = true
 	name_tag.outline_size = 10
-	UiTheme.sign_label(name_tag)
+	var rarity := int(info.get("rarity", 0))
+	UiTheme.sign_label(name_tag, UiTheme.CREAM if rarity == 0 else Balance.rarity(d).color.lightened(0.25))
 	name_tag.billboard = BaseMaterial3D.BILLBOARD_ENABLED
 	name_tag.position = Vector3(0, -0.36 + (find_mesh(d).get_aabb().size.y / _longest(find_mesh(d))) * size + 0.25, 0)
 	m.add_child(name_tag)
@@ -479,12 +505,181 @@ func _reveal_find(d: int, animate: bool) -> void:
 	var m: Node3D = _find_markers.get(d)
 	if m == null:
 		return
+	_drop_ghost(d)
 	m.visible = true
+	var rarity := int(Balance.DISCOVERIES[d].get("rarity", 0))
+	var color: Color = Balance.rarity(d).color
+	if rarity >= 4 and m.get_node_or_null("Glow") == null:
+		# Legendary finds shine, even after you've found them.
+		var glow := OmniLight3D.new()
+		glow.name = "Glow"
+		glow.light_color = color.lightened(0.3)
+		glow.light_energy = 1.4
+		glow.omni_range = 4.0
+		glow.position = Vector3(0, 0.6, 0)
+		m.add_child(glow)
 	if animate:
 		m.scale = Vector3.ONE * 0.2
 		var tw := m.create_tween()
-		tw.tween_property(m, "scale", Vector3.ONE * 1.5, 0.25).set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_OUT)
-		tw.tween_property(m, "scale", Vector3.ONE, 0.3)
+		tw.tween_property(m, "scale", Vector3.ONE * (1.45 + 0.1 * rarity), 0.25).set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_OUT)
+		tw.tween_property(m, "scale", Vector3.ONE, 0.35)
+		var at: Vector3 = _find_spots.get(d, m.position)
+		_shatter(at + Vector3(0, 0.3, 0), rarity, color)
+		_flash(at + Vector3(0, 0.9, 0), rarity, color)
+
+
+func _shatter(at: Vector3, rarity: int, color: Color) -> void:
+	## Shards of ice burst out where a find breaks free (more for rarer finds).
+	var p := CPUParticles3D.new()
+	var bm := BoxMesh.new()
+	bm.size = Vector3(0.1, 0.1, 0.1)
+	var mat := StandardMaterial3D.new()
+	mat.vertex_color_use_as_albedo = true
+	mat.roughness = 0.2
+	bm.material = mat
+	p.mesh = bm
+	p.amount = 26 + 14 * rarity
+	p.one_shot = true
+	p.explosiveness = 1.0
+	p.lifetime = 1.4
+	p.direction = Vector3.UP
+	p.spread = 75.0
+	p.initial_velocity_min = 2.5
+	p.initial_velocity_max = 6.0 + rarity
+	p.gravity = Vector3(0, -12.0, 0)
+	p.particle_flag_rotate_y = true
+	p.angular_velocity_min = -300.0
+	p.angular_velocity_max = 300.0
+	p.scale_amount_min = 0.6
+	p.scale_amount_max = 1.9
+	var shrink := Curve.new()
+	shrink.add_point(Vector2(0.0, 1.0))
+	shrink.add_point(Vector2(0.7, 0.85))
+	shrink.add_point(Vector2(1.0, 0.0))
+	p.scale_amount_curve = shrink
+	var tint := Gradient.new()   # mostly ice, some sparkle in the find's colour
+	tint.set_color(0, Color(0.88, 0.96, 1.0))
+	tint.set_color(1, Color(0.75, 0.9, 1.0) if rarity == 0 else color.lightened(0.2))
+	tint.add_point(0.6, Color(0.7, 0.86, 0.98))
+	p.color_initial_ramp = tint
+	p.position = at
+	add_child(p)
+	p.emitting = true
+	get_tree().create_timer(2.0).timeout.connect(p.queue_free)
+
+
+func _flash(at: Vector3, rarity: int, color: Color) -> void:
+	## A burst of light in the find's colour.
+	var l := OmniLight3D.new()
+	l.light_color = color.lerp(Color.WHITE, 0.3)
+	l.omni_range = 5.0 + 1.5 * rarity
+	l.light_energy = 0.0
+	l.position = at
+	add_child(l)
+	var tw := l.create_tween()
+	tw.tween_property(l, "light_energy", 3.0 + rarity, 0.08)
+	tw.tween_property(l, "light_energy", 0.0, 0.9 + 0.25 * rarity).set_ease(Tween.EASE_IN)
+	tw.tween_callback(l.queue_free)
+
+
+func _make_ghost(d: int, marker: Node3D) -> void:
+	## The find's shape, drawn through the ice (no depth test) and faded in
+	## by _update_ghosts once the ice around it gets thin. Dark for most
+	## finds; legendary ones glow.
+	var g := Models.fitted(find_mesh(d), find_size(d), -0.36)
+	g.position = marker.position
+	g.rotation.y = marker.rotation.y
+	var mat := StandardMaterial3D.new()
+	mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	mat.no_depth_test = true
+	mat.render_priority = -1
+	var rarity := int(Balance.DISCOVERIES[d].get("rarity", 0))
+	if rarity >= 4:
+		mat.blend_mode = BaseMaterial3D.BLEND_MODE_ADD
+		mat.albedo_color = Color(Balance.rarity(d).color, 0.0)
+	else:
+		mat.albedo_color = Color(0.02, 0.08, 0.18, 0.0).lerp(Color(Balance.rarity(d).color.darkened(0.6), 0.0), 0.35 * rarity / 3.0)
+	for c in g.get_children():
+		if c is GeometryInstance3D:
+			(c as GeometryInstance3D).material_override = mat
+			(c as GeometryInstance3D).cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	g.visible = false
+	add_child(g)
+	_ghosts[d] = {"node": g, "mat": mat, "alpha": 0.0, "target": 0.0}
+
+
+func _drop_ghost(d: int) -> void:
+	if _ghosts.has(d):
+		(_ghosts[d].node as Node3D).queue_free()
+		_ghosts.erase(d)
+
+
+func _update_ghosts(delta: float) -> void:
+	## Fade each find's shadow in or out with how much ice is left around it.
+	## One find's ice gets checked per frame, so it never costs much.
+	if _ghosts.is_empty():
+		return
+	var keys := _ghosts.keys()
+	_ghost_i = (_ghost_i + 1) % keys.size()
+	_recheck_ghost(keys[_ghost_i])
+	var t := Time.get_ticks_msec() * 0.001
+	for d in _ghosts:
+		var gh: Dictionary = _ghosts[d]
+		var node: Node3D = gh.node
+		gh.alpha = move_toward(float(gh.alpha), float(gh.target), delta * 0.8)
+		node.visible = gh.alpha > 0.01
+		if node.visible:
+			var mat: StandardMaterial3D = gh.mat
+			var c := mat.albedo_color
+			c.a = gh.alpha * 0.55 * (0.82 + 0.18 * sin(t * 2.6 + float(d)))
+			mat.albedo_color = c
+
+
+func _recheck_ghost(d: int) -> void:
+	var gh: Dictionary = _ghosts[d]
+	var target := 0.0
+	var dist := (gh.node as Node3D).position.distance_to(player.global_position + Vector3(0, 1.5, 0))
+	var g := int(Balance.DISCOVERIES[d].glacier)
+	if dist < GHOST_RANGE and g <= GameState.stage and _find_spots.has(d):
+		var cover := _ice_cover(_find_spots[d] + Vector3(0, 0.3, 0), glaciers[g])
+		target = clampf((GHOST_SHOW - cover) / (GHOST_SHOW - GHOST_FULL), 0.0, 1.0)
+		target *= clampf((GHOST_RANGE - dist) / 5.0, 0.0, 1.0)
+	gh.target = target
+
+
+func _ice_cover(p: Vector3, field: IceField) -> float:
+	## Roughly how much ice there is between p and open air (metres, up to 3),
+	## looking up and sideways (down is the valley floor).
+	if _cover_dirs.is_empty():
+		for x in [-1, 0, 1]:
+			for y in [0, 1]:
+				for z in [-1, 0, 1]:
+					if x != 0 or y != 0 or z != 0:
+						_cover_dirs.append(Vector3(x, y, z).normalized())
+	var best := 3.0
+	for dir in _cover_dirs:
+		var step := 0.25
+		while step < best:
+			if field.density_at(p + dir * step) < 0.5:
+				best = step
+				break
+			step += 0.25
+	return best
+
+
+func find_hint_at(at: Vector3) -> int:
+	## A find still frozen near this spot on the ice (for the HUD), or -1.
+	var best := -1
+	var best_d := HINT_RADIUS
+	for d in _ghosts:
+		if not _find_spots.has(d) or int(Balance.DISCOVERIES[d].glacier) > GameState.stage:
+			continue
+		var dist: float = (_find_spots[d] as Vector3).distance_to(at)
+		if dist < best_d:
+			best_d = dist
+			best = d
+	return best
 
 
 func _settle_finds(delta: float) -> void:

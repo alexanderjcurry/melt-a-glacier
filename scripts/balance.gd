@@ -102,27 +102,39 @@ const MAX_VISIBLE_WALKERS := 18   # per helper type; more helpers just work hard
 const HELPER_STAGE_POWER := [1.0, 200.0]
 const HELPER_STAGE_COST := [1.0, 600.0]
 
+# How special a find is. Rarer finds get a bigger reveal (more shards, a
+# brighter flash) and their colour on the name tag, the card and the shelf.
+const RARITIES = [
+	{"name": "Common", "color": Color(0.62, 0.66, 0.7)},
+	{"name": "Uncommon", "color": Color(0.36, 0.74, 0.34)},
+	{"name": "Rare", "color": Color(0.27, 0.56, 0.95)},
+	{"name": "Epic", "color": Color(0.67, 0.38, 0.92)},
+	{"name": "Legendary", "color": Color(1.0, 0.66, 0.12)},
+]
+
 # Buried things, frozen at a depth (layer) in one of the glaciers (0 = the
 # village glacier, 1 = the frozen lake). Each sells for a burst of meltwater.
+# rarity: an index into RARITIES. model: which model in models/finds.glb
+# (FindN, see World.find_mesh) when it isn't the same number as the find.
 const DISCOVERIES = [
-	{"name": "Lost Mitten", "icon": "🧤", "glacier": 0, "layer": 1, "value": 30.0, "flavor": "Still damp. Somehow."},
-	{"name": "Frozen Pizza", "icon": "🍕", "glacier": 0, "layer": 2, "value": 150.0, "flavor": "Best before 1987."},
-	{"name": "Mixtape", "icon": "📼", "glacier": 0, "layer": 2, "value": 200.0, "flavor": "Side B is all whale songs."},
-	{"name": "Lost Snowmobile", "icon": "🛷", "glacier": 0, "layer": 3, "value": 700.0, "flavor": "Keys still in it."},
-	{"name": "Viking Helmet", "icon": "🪖", "glacier": 0, "layer": 4, "value": 2000.0, "flavor": "No horns. Historians were right."},
-	{"name": "1970s Caveman", "icon": "🕺", "glacier": 0, "layer": 5, "value": 4000.0, "flavor": "Thawed out mid-dance move."},
-	{"name": "Message in a Bottle", "icon": "🍾", "glacier": 0, "layer": 5, "value": 4500.0, "flavor": "It says 'help, cold'."},
-	{"name": "Yeti's Phone", "icon": "📱", "glacier": 0, "layer": 6, "value": 10000.0, "flavor": "4,812 unread messages."},
-	{"name": "Frozen Mammoth", "icon": "🦣", "glacier": 0, "layer": 7, "value": 20000.0, "flavor": "He looks annoyed."},
-	{"name": "Prehistoric Fish", "icon": "🐟", "glacier": 0, "layer": 8, "value": 35000.0, "flavor": "Do not microwave."},
-	{"name": "Dinosaur Egg", "icon": "🥚", "glacier": 0, "layer": 9, "value": 70000.0, "flavor": "It's warm now. Uh oh."},
-	{"name": "Ice Skater", "icon": "⛸️", "glacier": 1, "layer": 1, "value": 8000.0, "flavor": "Mid-spin since 1952. Very dizzy."},
-	{"name": "Rowboat", "icon": "🚣", "glacier": 1, "layer": 2, "value": 25000.0, "flavor": "Someone really wanted to go fishing."},
-	{"name": "Pirate Treasure", "icon": "💰", "glacier": 1, "layer": 3, "value": 80000.0, "flavor": "Wrong ocean. Very wrong ocean."},
-	{"name": "Frozen Whale", "icon": "🐋", "glacier": 1, "layer": 5, "value": 200000.0, "flavor": "Nobody knows how he got into a lake."},
-	{"name": "Lake Monster", "icon": "🦕", "glacier": 1, "layer": 6, "value": 500000.0, "flavor": "Real. Shy. Would like a towel."},
-	{"name": "Crashed UFO", "icon": "🛸", "glacier": 1, "layer": 8, "value": 3000000.0, "flavor": "They came for the ice. They stayed."},
-	{"name": "The Sun's Lost Ray", "icon": "🌟", "glacier": 1, "layer": 9, "value": 8000000.0, "flavor": "So that's where summer went."},
+	{"name": "Lost Mitten", "icon": "🧤", "glacier": 0, "layer": 1, "rarity": 0, "value": 30.0, "flavor": "Still damp. Somehow."},
+	{"name": "Frozen Pizza", "icon": "🍕", "glacier": 0, "layer": 2, "rarity": 0, "value": 150.0, "flavor": "Best before 1987."},
+	{"name": "Mixtape", "icon": "📼", "glacier": 0, "layer": 2, "rarity": 1, "value": 200.0, "flavor": "Side B is all whale songs."},
+	{"name": "Lost Snowmobile", "icon": "🛷", "glacier": 0, "layer": 3, "rarity": 1, "value": 700.0, "flavor": "Keys still in it."},
+	{"name": "Viking Helmet", "icon": "🪖", "glacier": 0, "layer": 4, "model": 5, "rarity": 2, "value": 2000.0, "flavor": "No horns. Historians were right."},
+	{"name": "1970s Caveman", "icon": "🕺", "glacier": 0, "layer": 5, "model": 6, "rarity": 2, "value": 4000.0, "flavor": "Thawed out mid-dance move."},
+	{"name": "Message in a Bottle", "icon": "🍾", "glacier": 0, "layer": 5, "model": 9, "rarity": 1, "value": 4500.0, "flavor": "It says 'help, cold'."},
+	{"name": "Yeti's Phone", "icon": "📱", "glacier": 0, "layer": 6, "model": 8, "rarity": 3, "value": 10000.0, "flavor": "4,812 unread messages."},
+	{"name": "Frozen Mammoth", "icon": "🦣", "glacier": 0, "layer": 7, "model": 4, "rarity": 3, "value": 20000.0, "flavor": "He looks annoyed."},
+	{"name": "Prehistoric Fish", "icon": "🐟", "glacier": 0, "layer": 8, "model": 7, "rarity": 3, "value": 35000.0, "flavor": "Do not microwave."},
+	{"name": "Dinosaur Egg", "icon": "🥚", "glacier": 0, "layer": 9, "rarity": 4, "value": 70000.0, "flavor": "It's warm now. Uh oh."},
+	{"name": "Ice Skater", "icon": "⛸️", "glacier": 1, "layer": 1, "rarity": 1, "value": 8000.0, "flavor": "Mid-spin since 1952. Very dizzy."},
+	{"name": "Rowboat", "icon": "🚣", "glacier": 1, "layer": 2, "rarity": 1, "value": 25000.0, "flavor": "Someone really wanted to go fishing."},
+	{"name": "Pirate Treasure", "icon": "💰", "glacier": 1, "layer": 3, "rarity": 2, "value": 80000.0, "flavor": "Wrong ocean. Very wrong ocean."},
+	{"name": "Frozen Whale", "icon": "🐋", "glacier": 1, "layer": 5, "rarity": 3, "value": 200000.0, "flavor": "Nobody knows how he got into a lake."},
+	{"name": "Lake Monster", "icon": "🦕", "glacier": 1, "layer": 6, "rarity": 3, "value": 500000.0, "flavor": "Real. Shy. Would like a towel."},
+	{"name": "Crashed UFO", "icon": "🛸", "glacier": 1, "layer": 8, "rarity": 4, "value": 3000000.0, "flavor": "They came for the ice. They stayed."},
+	{"name": "The Sun's Lost Ray", "icon": "🌟", "glacier": 1, "layer": 9, "rarity": 4, "value": 8000000.0, "flavor": "So that's where summer went."},
 ]
 
 # --- Boosts, ads -----------------------------------------------------------------------
@@ -132,6 +144,10 @@ const BOOST_MULT := 2.0
 const PERMANENT_MULT := 2.0            # from the "Remove ads + permanent 2x" IAP
 const INTERSTITIAL_COOLDOWN := 240.0
 const INTERSTITIAL_MIN_PROGRESS := 0.15  # no interstitials before 15% of the ice is gone
+
+
+static func rarity(d: int) -> Dictionary:
+	return RARITIES[int(DISCOVERIES[d].get("rarity", 0))]
 
 
 static func finds_in(glacier: int) -> Array:

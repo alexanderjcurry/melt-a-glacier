@@ -10,7 +10,8 @@ extends Node3D
 const WALKER_TYPES := [0, 1]           # indices into Balance.HELPERS that walk
 const VOLCANO_TYPE := 2
 const VOLCANO_POS := Vector3(-30.0, 13.0, -47.0)   # in his hollow, clear of the path behind the glacier
-const WALK_SPEED := [1.2, 1.1]         # m/s, per walker type
+const WALK_SPEED := [1.2, 1.5]         # m/s, per walker type
+const ROAM := [6.0, 9.0]               # furthest they head for in one go
 # Their heat lands in a few small, shallow spots scattered around them (the
 # sauna crew's hot stones warm a wide circle), so the ice wears down a little
 # everywhere they go instead of in one deep hole.
@@ -178,7 +179,7 @@ func _update_walker(w: Dictionary, delta: float) -> void:
 	if tgt != Vector3.INF:
 		flat = Vector3(tgt.x - pos.x, 0.0, tgt.z - pos.z)
 	if tgt == Vector3.INF or flat.length() < 0.4 or not grid.has_ice_at(tgt.x, tgt.z):
-		var pick := _pick_target(pos)
+		var pick := _pick_target(pos, ROAM[t])
 		tgt = pick[0]
 		w.target = tgt
 		w.scramble = not pick[1]   # no easy way anywhere: climb out however it takes
@@ -195,7 +196,7 @@ func _update_walker(w: Dictionary, delta: float) -> void:
 		return
 	pos += dir * minf(float(WALK_SPEED[t]) * delta, flat.length())
 	node.rotation.y = lerp_angle(node.rotation.y, atan2(-dir.x, -dir.z), minf(1.0, delta * 6.0))
-	w.t += delta * (11.0 if t == 0 else 8.0)
+	w.t += delta * (11.0 if t == 0 else 10.5)
 	# Melt a thin layer just ahead of their feet as they go.
 	var on_ice := grid.has_ice_at(pos.x, pos.z)
 	if on_ice:
@@ -222,7 +223,7 @@ func _update_walker(w: Dictionary, delta: float) -> void:
 	_pose(w, 1.0, 0.35 if on_ice else 0.0, false)
 
 
-func _pick_target(from: Vector3) -> Array:
+func _pick_target(from: Vector3, roam: float = 6.0) -> Array:
 	## [spot, easy]: somewhere on the ice a few metres away, preferring snow
 	## that hasn't been melted down yet (so the glacier wears down evenly
 	## instead of getting trenches), reachable without dropping into a hole or
@@ -232,7 +233,7 @@ func _pick_target(from: Vector3) -> Array:
 	var best_score := -INF
 	for _try in 10:
 		var ang := _rng.randf() * TAU
-		var dist := _rng.randf_range(2.0, 6.0)
+		var dist := _rng.randf_range(roam / 3.0, roam)
 		var to := from + Vector3(sin(ang), 0.0, cos(ang)) * dist
 		if not grid.has_ice_at(to.x, to.z):
 			continue
@@ -242,6 +243,7 @@ func _pick_target(from: Vector3) -> Array:
 		var ok := true
 		var prev := h0
 		var steps := int(ceil(dist / 0.6))
+		var worn := 0.0   # how much has melted off along the way already
 		for k in range(1, steps + 1):
 			var p := from.lerp(to, float(k) / steps)
 			var hp := grid.surface_y(p.x, p.z)
@@ -249,10 +251,11 @@ func _pick_target(from: Vector3) -> Array:
 				ok = false
 				break
 			prev = hp
+			worn += grid.original_top(p.x, p.z) - hp
 		if not ok:
 			continue
-		var worn := grid.original_top(to.x, to.z) - h   # how much has melted off here already
-		var score := -worn + _rng.randf() * 0.5
+		# Fresh snow all the way, so they don't keep crossing their own tracks.
+		var score := -worn / steps + _rng.randf() * 0.3
 		if score > best_score:
 			best_score = score
 			best = Vector3(to.x, h, to.z)

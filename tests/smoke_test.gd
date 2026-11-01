@@ -316,13 +316,35 @@ func _run() -> void:
 	var wp: Vector3 = w0.pos
 	check(absf(wp.y - grid.surface_y(wp.x, wp.z)) < 0.4, "the penguin stands on the ice surface (%.2f vs %.2f)" % [wp.y, grid.surface_y(wp.x, wp.z)])
 
-	# --- Dig up a find.
+	# --- Dig up a find. Its shadow shows through the ice as you get close.
 	var find := 0
 	var marker: Node3D = world._find_markers[find]
+	var spot: Vector3 = world._find_spots[find]
 	check(not marker.visible, "the %s starts frozen and hidden" % Balance.DISCOVERIES[find].name)
+	check(world.find_hint_at(spot + Vector3(0.5, 1.0, 0.0)) == find and world.find_hint_at(spot + Vector3(9, 0, 0)) == -1,
+		"aiming at the ice right by it hints that something's frozen in there")
+	player.respawn(Vector3(spot.x, 0.0, spot.z + 6.0), 0.0)
+	world._recheck_ghost(find)
+	var cover0: float = world._ice_cover(spot + Vector3(0, 0.3, 0), grid)
+	var target0: float = world._ghosts[find].target
+	# Melt the ice off the top until there's not much left over it.
+	var ceiling: float = grid.surface_y(spot.x, spot.z)
+	while ceiling > spot.y + 1.2:
+		grid.damage_sphere(Vector3(spot.x, ceiling, spot.z), 1.0, 1e9)
+		ceiling = grid.surface_y(spot.x, spot.z)
+	world._recheck_ghost(find)
+	for _i in 20:
+		world._update_ghosts(0.1)
+	world._recheck_ghost(find)
+	var gh: Dictionary = world._ghosts[find]
+	check(not gs.discovered[find] and gh.target > target0 and gh.alpha > 0.05 and (gh.node as Node3D).visible,
+		"its shadow shows through the thinner ice (%.1f m of ice, was %.1f: %.2f -> %.2f)" % [world._ice_cover(spot + Vector3(0, 0.3, 0), grid), cover0, target0, gh.alpha])
 	grid.damage_sphere(marker.position, 1.2, 1e9)
 	check(gs.discovered[find], "melting around it discovers %s" % Balance.DISCOVERIES[find].name)
 	check(marker.visible, "the find shows up in the world")
+	check(not world._ghosts.has(find), "and its shadow is gone")
+	var card = world.hud._find_card
+	check(card != null and is_instance_valid(card) and card.is_inside_tree(), "a card says what you found and what's still out there")
 
 	# --- Helpers melt a thin layer as they walk instead of digging pits.
 	gs.buy_helper(1)
@@ -343,8 +365,9 @@ func _run() -> void:
 				touched += 1
 			if dent > 1.2:
 				deep += 1
-	# (Digging pits instead touches ~170 spots, most of them more than 1.2 m deep.)
-	check(vol0 - grid.volume_left() > 20.0 and touched > 400 and deep < touched / 20,
+	# (Digging pits instead touches ~170 spots, most of them more than 1.2 m deep.
+	# Wandering, a few spots get crossed twice: usually under 1%, now and then 4%.)
+	check(vol0 - grid.volume_left() > 20.0 and touched > 400 and deep < touched / 10,
 		"helpers wear the ice down evenly (%.0f m³ in 20 s over %d spots, %d deeper than 1.2 m)" % [vol0 - grid.volume_left(), touched, deep])
 
 	# --- Ice left floating in the air melts away by itself, slowly.

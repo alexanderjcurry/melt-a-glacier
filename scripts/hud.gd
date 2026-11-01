@@ -49,6 +49,8 @@ var _refresh_timer := 0.0
 var _far_check_timer := 0.0
 var _too_far := false
 var _ending_shown := false
+var find_hint: Callable                # World.find_hint_at: a find frozen near this spot, or -1
+var _find_card: Control
 
 
 class Crosshair:
@@ -338,6 +340,11 @@ func _process(delta: float) -> void:
 
 
 func _refresh() -> void:
+	# Toasts go under the find card while it's up.
+	var top := 80.0
+	if _find_card != null and is_instance_valid(_find_card) and _find_card.is_inside_tree():
+		top = _find_card.offset_top + _find_card.size.y + 8.0
+	toast_box.offset_top = top
 	water_label.text = "💧 " + Fmt.num(GameState.water)
 	var rate := GameState.total_helper_power()
 	rate_label.text = "Helpers: %s hp/s" % Fmt.num(rate) if rate > 0.0 else "Melt ice, sell the water"
@@ -355,6 +362,9 @@ func _refresh() -> void:
 		var g: IceField = t.grid
 		var l := g.layer_at(t.pos - t.normal * 0.3)
 		target_label.text = "%s  ·  💧%s per m³" % [g.layer_name(l), Fmt.num(GameState.layer_value(g, l))]
+		var near: int = find_hint.call(t.pos) if find_hint.is_valid() else -1
+		if near >= 0:
+			target_label.text += "\n" + _tease(near)
 	elif _too_far:
 		target_label.text = "Too far away. Walk closer"
 	else:
@@ -399,8 +409,117 @@ func toast(text: String) -> void:
 
 
 func _on_discovered(i: int, value: float) -> void:
+	show_find(i, value)
+
+
+static func _tease(d: int) -> String:
+	## What the hint says about a find you haven't dug up yet (it gives away
+	## how special it is, not what it is).
+	match int(Balance.DISCOVERIES[d].get("rarity", 0)):
+		0, 1:
+			return "❓ Something's frozen in here!"
+		2:
+			return "❓ Something rare is frozen in here!"
+		3:
+			return "✨ Something BIG is frozen in here!"
+		_:
+			return "🌟 Something amazing is frozen in here!"
+
+
+func show_find(i: int, value: float) -> void:
+	## A find just melted out: a big card at the top for a few seconds (play
+	## goes on), saying how rare it is and what's still out there.
 	var d: Dictionary = Balance.DISCOVERIES[i]
-	toast("%s %s melted out! Sold for 💧%s" % [d.icon, d.name, Fmt.num(value)])
+	var rarity := int(d.get("rarity", 0))
+	var rar: Dictionary = Balance.rarity(i)
+	if _find_card != null and is_instance_valid(_find_card):
+		_find_card.queue_free()
+	var card := PanelContainer.new()
+	card.add_theme_stylebox_override("panel", UiTheme.paper(14.0))
+	card.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	card.anchor_left = 0.5
+	card.anchor_right = 0.5
+	card.offset_left = -310
+	card.offset_right = 310
+	card.offset_top = 76   # just under the ice bar, clear of the crosshair (the find is there)
+	card.grow_horizontal = Control.GROW_DIRECTION_BOTH
+	var v := VBoxContainer.new()
+	v.add_theme_constant_override("separation", 0)
+	v.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	card.add_child(v)
+	var tier_text := "%s FIND" % str(rar.name).to_upper()
+	if rarity >= 4:
+		tier_text = "🌟 %s! 🌟" % tier_text
+	elif rarity >= 2:
+		tier_text = "✨ %s ✨" % tier_text
+	var tier := _card_line(tier_text, 20, rar.color)
+	UiTheme.outlined(tier, 20, rar.color, 5)
+	v.add_child(tier)
+	var title := _card_line("%s %s" % [d.icon, d.name], 34, INK)
+	title.add_theme_font_override("font", UiTheme.display_font())
+	v.add_child(title)
+	var line := _card_line("“%s”   +💧 %s" % [d.flavor, Fmt.num(value)], 19, INK_SOFT)
+	v.add_child(line)
+	var next := _card_line(_whats_next(i), 16, BROWN)
+	next.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	next.custom_minimum_size = Vector2(580, 0)
+	v.add_child(next)
+	root.add_child(card)
+	root.move_child(card, popups.get_index())   # popups stay on top
+	_find_card = card
+	card.modulate.a = 0.0
+	card.scale = Vector2(0.85, 0.85)
+	card.pivot_offset = Vector2(310, 50)
+	var tw := card.create_tween()
+	tw.set_parallel(true)
+	tw.tween_property(card, "modulate:a", 1.0, 0.18)
+	tw.tween_property(card, "scale", Vector2.ONE, 0.35).set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_OUT)
+	tw.chain().tween_interval(3.2 + 0.7 * rarity)
+	tw.chain().tween_property(card, "modulate:a", 0.0, 0.5)
+	tw.chain().tween_callback(card.queue_free)
+
+
+func _card_line(text: String, size: int, color: Color) -> Label:
+	var l := Label.new()
+	l.text = text
+	l.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	l.add_theme_font_size_override("font_size", size)
+	l.add_theme_color_override("font_color", color)
+	l.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	return l
+
+
+static func _whats_next(i: int) -> String:
+	## "3 of 11 found in the village glacier. Something rare is still frozen
+	## down in the Glacial Ice…"
+	var g := int(Balance.DISCOVERIES[i].glacier)
+	var finds := Balance.finds_in(g)
+	var found := 0
+	var next := -1
+	for d in finds:
+		if GameState.discovered[d]:
+			found += 1
+		elif next < 0 or int(Balance.DISCOVERIES[d].layer) < int(Balance.DISCOVERIES[next].layer):
+			next = d
+	var field: IceField = GameState.grids[g] if g < GameState.grids.size() else null
+	var where: String = field.spec.name if field != null else "this glacier"
+	var text := "%d of %d found in %s." % [found, finds.size(), where]
+	if next >= 0:
+		var what := "Something"
+		match int(Balance.DISCOVERIES[next].get("rarity", 0)):
+			2:
+				what = "Something rare"
+			3:
+				what = "Something big"
+			4:
+				what = "Something legendary"
+		var layer: String = field.layer_name(int(Balance.DISCOVERIES[next].layer)) if field != null else "ice"
+		text += " %s is still frozen down in the %s…" % [what, layer]
+	elif g + 1 < GameState.grids.size():
+		text += " That's all of them here. Who knows what's waiting in %s…" % GameState.grids[g + 1].spec.name
+	else:
+		text += " You found every last one!"
+	return text
 
 
 func _on_boost_pressed() -> void:
