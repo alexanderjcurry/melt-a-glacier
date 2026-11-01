@@ -174,7 +174,7 @@ func _wake(s: Dictionary, pay: bool) -> void:
 	var i := 0
 	for holder in s.crew:
 		var mi := (holder as Node3D).get_child(0) as MeshInstance3D
-		mi.material_override = null
+		mi.material_override = MeshKit.material()   # back to full colour (null would be plain grey)
 		var tw := mi.create_tween().set_loops()
 		tw.tween_interval(0.13 * i)
 		tw.tween_property(mi, "position:y", 0.35, 0.3).set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_OUT)
