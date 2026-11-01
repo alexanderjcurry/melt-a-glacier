@@ -117,7 +117,10 @@ func _ready() -> void:
 	popups.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	root.add_child(popups)
 	_build_rotate_overlay()
-	set_touch_mode(DisplayServer.is_touchscreen_available())
+	# Phones (the iPhone browser included) start in touch mode, so nothing
+	# says "Press B" or "click" there; a mouse click switches to the PC hints.
+	set_touch_mode(DisplayServer.is_touchscreen_available() or OS.has_feature("mobile")
+		or OS.has_feature("web_ios") or OS.has_feature("web_android"))
 	GameState.discovered_item.connect(_on_discovered)
 	Monetization.purchase_error.connect(_on_purchase_error)
 	Monetization.purchases_changed.connect(_on_purchases_changed)
