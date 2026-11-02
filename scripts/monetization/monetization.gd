@@ -31,6 +31,7 @@ const PRODUCTS = {
 var provider: MonetizationProvider
 var _reward_callbacks: Dictionary = {}   # placement -> Callable(bool)
 var _last_interstitial: float = 0.0
+var _interstitial_open := false          # an interstitial is on screen (the game goes quiet)
 
 
 func _ready() -> void:
@@ -41,6 +42,7 @@ func _ready() -> void:
 	provider.purchase_succeeded.connect(_grant)
 	provider.purchase_restored.connect(_grant)
 	provider.purchase_failed.connect(func(id, reason): purchase_error.emit(id, reason))
+	provider.interstitial_closed.connect(func(_p): _interstitial_open = false)
 	provider.initialize()
 	_last_interstitial = Time.get_unix_time_from_system()
 
@@ -77,6 +79,11 @@ func is_watching() -> bool:
 	return not _reward_callbacks.is_empty()
 
 
+func is_showing_ad() -> bool:
+	## Any ad on screen: the game's own sound goes quiet (Sound).
+	return is_watching() or _interstitial_open
+
+
 func _on_rewarded_completed(placement: String) -> void:
 	# Someone who just chose to watch an ad shouldn't get an unasked one next.
 	_last_interstitial = Time.get_unix_time_from_system()
@@ -105,6 +112,7 @@ func maybe_show_interstitial(placement: String) -> void:
 	if t - _last_interstitial < Balance.INTERSTITIAL_COOLDOWN:
 		return
 	_last_interstitial = t
+	_interstitial_open = true
 	provider.show_interstitial(placement)
 
 

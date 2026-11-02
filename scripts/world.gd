@@ -122,6 +122,7 @@ func _ready() -> void:
 			field.load_save_string(saved)
 		field.ice_melted.connect(_on_ice_melted.bind(field))
 		field.find_exposed.connect(_on_find_exposed)
+		field.chunk_loosened.connect(_on_chunk_loosened)
 	GameState.grid = glaciers[stage]
 	fleet.settle(glaciers)
 	GameState.stage_changed.connect(_on_stage_changed)
@@ -162,9 +163,13 @@ func _ready() -> void:
 	hud.find_hint = find_hint_at
 	add_child(hud)
 	hud.respawn_requested.connect(respawn)
-	fleet.ship_spotted.connect(func(_n: String): hud.toast("⚓ There's a ship frozen in here!"))
+	fleet.ship_spotted.connect(func(_n: String):
+		Sound.play("ship_bell", -6.0)
+		hud.toast("⚓ There's a ship frozen in here!"))
 	fleet.ship_freed.connect(func(n: String, bounty: float):
+		Sound.jingle("pirate_sting", -3.0, 2.5)
 		hud.toast("☠️ %s is free! The goblins pay you 💧 %s" % [n, Fmt.num(bounty)]))
+	Sound.indoors = false
 
 	get_window().size_changed.connect(_fit_render_scale)
 	_fit_render_scale()
@@ -183,6 +188,7 @@ func _ready() -> void:
 func respawn() -> void:
 	## The "I'm stuck" button: back to the start, next to the shed.
 	player.respawn(SPAWN, SPAWN_YAW)
+	Sound.play("respawn", -4.0)
 	hud.toast("🏠 Back at the start")
 
 
@@ -306,6 +312,9 @@ func _unhandled_input(event: InputEvent) -> void:
 				hud.toggle_catalogue()
 			KEY_B:
 				hud.take_offer()
+			KEY_M:
+				Sound.set_muted(not Sound.muted)
+				hud.toast("🔇 Sound off (M to turn it back on)" if Sound.muted else "🔊 Sound on")
 			KEY_E, KEY_ENTER:
 				if hud.catalogue_open:
 					hud.close_catalogue()
@@ -324,6 +333,7 @@ func _update_shed(delta: float) -> void:
 	var inside := shed.contains(player.position)
 	if inside != _in_shed:
 		_in_shed = inside
+		Sound.set_indoors(inside)
 		shed.marker.visible = not inside
 		if not inside:
 			# Walking out: done shopping (for the hints), save, and maybe an ad.
@@ -345,6 +355,16 @@ func use_aimed() -> void:
 	if _aimed.is_empty():
 		return
 	var r := shed.use(_aimed)
+	if r.ok:
+		match str(_aimed.kind):
+			"tool":
+				Sound.jingle("buy_tool", -2.0, 1.2)
+			"upgrade":
+				Sound.play("buy_upgrade", -3.0, 1.0, 0.03)
+			"helper":
+				Sound.play("hire_%d" % clampi(int(_aimed.id), 0, 2), -3.0, 1.0, 0.04)
+	elif r.text != "":
+		Sound.play("cant_afford", -4.0, 1.0, 0.05)
 	if r.open_catalogue:
 		hud.open_catalogue()
 	elif r.text != "":
@@ -368,7 +388,13 @@ func _on_ice_melted(at: Vector3, volume: float, value: float, field: IceField) -
 	elif field.fraction_left() < FINALE_FRACTION:
 		# The last crumbs of the glacier collapse into slush on their own.
 		hud.toast("💦 The last of %s collapses into slush!" % field.spec.name)
+		Sound.play("slush_collapse", -2.0)
 		field.melt_everything.call_deferred()
+
+
+func _on_chunk_loosened(at: Vector3, volume: float) -> void:
+	## A bit of ice came loose (it melts away by itself now): it cracks off.
+	Sound.play_at("chunk_break", at, clampf(-10.0 + 2.0 * volume, -10.0, 0.0), 1.0, 0.1, 6.0, 0.3)
 
 
 func _on_find_exposed(d: int) -> void:
@@ -536,6 +562,7 @@ func _reveal_find(d: int, animate: bool) -> void:
 		tw.tween_property(m, "scale", Vector3.ONE * (1.45 + 0.1 * rarity), 0.25).set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_OUT)
 		tw.tween_property(m, "scale", Vector3.ONE, 0.35)
 		var at: Vector3 = _find_spots.get(d, m.position)
+		Sound.play_at("find_shatter", at, 0.0, 1.05 - 0.05 * rarity, 0.04, 8.0)
 		_shatter(at + Vector3(0, 0.3, 0), rarity, color)
 		_flash(at + Vector3(0, 0.9, 0), rarity, color)
 
@@ -954,8 +981,10 @@ func _open_gate(animate: bool) -> void:
 		lock.visible = false
 	var open_angle := deg_to_rad(-105.0)   # swung in toward the lake
 	if animate:
+		Sound.play("gate_unlock", -2.0)
 		var tw := _gate.create_tween()
 		tw.tween_interval(1.2)
+		tw.tween_callback(func(): Sound.play_at("gate_creak", _gate.global_position + Vector3(1.7, 1.0, 0.0), 0.0, 1.0, 0.03, 12.0))
 		tw.tween_property(_gate, "rotation:y", open_angle, 2.2).set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_OUT)
 	else:
 		_gate.rotation.y = open_angle

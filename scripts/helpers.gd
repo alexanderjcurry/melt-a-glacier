@@ -211,6 +211,7 @@ func _update_walker(w: Dictionary, delta: float) -> void:
 			var spread: float = SPREAD[t]
 			var amount: float = w.heat / (WALK_WORK * r * r * r * float(n))
 			var ahead_c := Vector3(pos.x, 0.0, pos.z) - node.global_transform.basis.z * spread * 0.4
+			_chatter(t, pos)
 			for _k in n:
 				var a := _rng.randf() * TAU
 				var spot := ahead_c + Vector3(cos(a), 0.0, sin(a)) * spread * sqrt(_rng.randf())
@@ -224,6 +225,18 @@ func _update_walker(w: Dictionary, delta: float) -> void:
 	w.pos = pos
 	node.position = pos
 	_pose(w, 1.0, 0.35 if on_ice else 0.0, false)
+
+
+func _chatter(t: int, at: Vector3) -> void:
+	## Now and then a penguin squawks, or the sauna crew throw water on the
+	## stones (and sigh happily). Only a few at a time, however many you hire.
+	if t == 0:
+		if _rng.randf() < 0.035:
+			Sound.play_at("penguin", at + Vector3(0, 0.6, 0), -4.0, 1.0, 0.12, 5.0, 0.7)
+	elif _rng.randf() < 0.03:
+		Sound.play_at("sauna_steam", at + Vector3(0, 0.6, 0), -6.0, 1.0, 0.1, 5.0, 1.2)
+	elif _rng.randf() < 0.006:
+		Sound.play_at("sauna_ahh", at + Vector3(0, 1.0, 0), -6.0, 1.0, 0.08, 5.0, 4.0)
 
 
 func _pick_target(from: Vector3, roam: float = 6.0) -> Array:
@@ -401,6 +414,7 @@ func _launch_bomb(to: Vector3, damage: float, size: float = 1.0) -> void:
 	trail.emitting = true
 	var from := VOLCANO_POS + Vector3(0, 0.5, 0)
 	node.position = from
+	Sound.play_at("kevin_launch", from, -2.0 + 2.0 * size, 1.05 - 0.1 * (size - 1.0), 0.08, 22.0)
 	var far := from.distance_to(to)   # the lake is a long way off: higher, slower lobs
 	_bombs.append({"node": node, "from": from, "to": to, "t": 0.0, "dur": clampf(far / 28.0, 1.8, 5.0),
 		"arc": clampf(far * 0.3, 14.0, 40.0), "damage": damage, "size": size})
@@ -416,8 +430,12 @@ func _update_bombs(delta: float) -> void:
 		p.y += sin(k * PI) * float(b.arc)
 		var node: MeshInstance3D = b.node
 		node.position = p
+		if k >= 0.62 and not b.get("whistled", false):
+			b.whistled = true   # it whistles as it comes down
+			Sound.play_at("bomb_whistle", to + Vector3(0, 6.0, 0), -6.0, 1.0, 0.08, 8.0)
 		if k >= 1.0:
 			var size: float = b.size
+			Sound.play_at("bomb_land", to, -3.0 + 3.0 * (size - 1.0), 1.0 - 0.15 * (size - 1.0), 0.08, 9.0)
 			grid.damage_sphere(to + Vector3(0, -0.4 * size, 0), BOMB_RADIUS * size, b.damage)
 			_puff(to, size)
 			node.queue_free()

@@ -106,6 +106,8 @@ func _run() -> void:
 	check(gs.water > water0, "melting paid out (%s water)" % gs.water)
 	check(player.target.hit and player.target.pos.distance_to(first_hit) > 0.4, "it dug a hole: the ice surface moved back %.2f m" % (player.target.pos.distance_to(first_hit) if player.target.hit else 0.0))
 
+	await _sound(world, player)
+
 	# --- Phone controls: hold to melt, the stick, drag to look.
 	world.hud.set_touch_mode(true)
 	await _frames(1)
@@ -549,7 +551,7 @@ func _run() -> void:
 	player._move(1.0 / 60.0)
 	_aim_at(player, Vector3(near.x, 1.0, near.z + 3.5))
 	player.melting = true
-	for _i in 30:
+	for _i in 90:   # 3 s: Kevin's bombs may have bared harder ice here already
 		player._update_tool(1.0 / 30.0)
 	player.melting = false
 	player._update_tool(0.0)
@@ -588,6 +590,8 @@ func _run() -> void:
 	gs.reset_state()
 	gs.load_game()
 	check(gs.has_won and gs.tool_index == 1 and absf(gs.water - water_saved) < 0.01, "save/load round trip")
+	await process_frame
+	check(root.get_node("Sound")._music_list == "summer", "summer's tune plays after the ending")
 	check(gs.stage == 1 and gs.glacier_saves.size() == 2 and gs.glacier_saves[0] == "gone" and str(gs.glacier_saves[1]).begins_with("v3:"),
 		"glaciers stored in the save (%d KB)" % (str(gs.glacier_saves[1]).length() / 1024))
 
@@ -603,6 +607,56 @@ func _run() -> void:
 	gs.wipe_save()
 	print("SMOKE TEST ", "PASSED" if ok else "FAILED")
 	quit(0 if ok else 1)
+
+
+func _sound(world, player) -> void:
+	## Every sound the game asks for exists, and the tool, steam and music run.
+	var sound = root.get_node("Sound")
+	var names := {}
+	var re := RegEx.create_from_string("Sound\\.(?:play|play_at|jingle)\\(\"([a-z0-9_]+)\"")
+	for f in DirAccess.get_files_at("res://scripts"):
+		if f.ends_with(".gd"):
+			for m in re.search_all(FileAccess.get_file_as_string("res://scripts/" + f)):
+				names[m.get_string(1)] = true
+	for i in 6:
+		names["tool_on_%d" % i] = true
+		names["tool_loop_%d" % i] = true
+	for i in 3:
+		names["hire_%d" % i] = true
+	for i in range(1, 6):
+		names["find_jingle_%d" % i] = true
+	for n in ["step_snow", "step_ground", "step_wood", "crack", "lake_crack", "drip", "jump", "land", "jet_start",
+			"jet_sputter", "jet_loop", "sizzle_loop", "wind", "birds", "stage_done", "click", "shed_bell",
+			"valley_1", "valley_2", "lake_1", "lake_2", "summer"]:
+		names[n] = true
+	var missing: Array = []
+	for n in names:
+		if sound.streams(n).is_empty():
+			missing.append(n)
+	check(missing.is_empty() and names.size() > 50, "all %d sounds exist %s" % [names.size(), missing])
+	check(sound.streams("crack").size() >= 3, "cracks come in %d variations" % sound.streams("crack").size())
+	check(sound._music_list == "valley", "the valley's music is lined up (%s)" % sound._music_list)
+	var steps0: int = player.steps
+	world.force_melt = true
+	for _i in 20:
+		await process_frame
+	check(sound.loop_volume("tool") > 0.0 and sound._loops.tool.player.playing, "the hair dryer whirs while melting")
+	check(sound.loop_volume("sizzle") > 0.0, "the ice hisses where the heat lands")
+	world.force_melt = false
+	for _i in 40:
+		await process_frame
+	check(sound.loop_volume("tool") == 0.0, "and goes quiet when you let go")
+	var was_at: Vector3 = player.position
+	player.move_input = Vector2(0, -1)   # back off the ice face, away from the glacier
+	for _i in 120:
+		player._move(1.0 / 60.0)
+	player.move_input = Vector2.ZERO
+	check(player.steps >= steps0 + 4, "walking takes footsteps (%d in 2 s)" % (player.steps - steps0))
+	player.respawn(was_at, player.yaw)
+	var mv: float = sound.music_volume
+	sound.set_music_volume(0.3)
+	check(AudioServer.get_bus_volume_db(AudioServer.get_bus_index("Music")) < -8.0, "the music volume setting turns the Music bus down")
+	sound.set_music_volume(mv)
 
 
 func _ad_offers(gs, hud, player) -> void:

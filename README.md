@@ -88,6 +88,7 @@ iOS comes later through Codemagic (Godot workflow). Nothing in the code is Andro
 | Light interstitials: only when leaving the shed, after 15% of the ice is gone, at most every 4 min, never with Remove Ads | `Monetization.maybe_show_interstitial()` |
 | A popup when the village is free, an ending with a stats screen when the lake is, then walk around or open "Where to next?": the valley to melt again, and the maps still to come (Frozen Harbor, Arctic Research Base, Ice Cave City, Mammoth Graveyard, Frozen Volcano, The Polar Cap) stamped COMING SOON. It's in the catalogue too once you've won | `Hud.show_stage_done()`, `Hud.show_ending()`, `scripts/level_menu.gd`, `Levels.MAPS` |
 | Short onboarding hints the first time | `World._update_coach()` |
+| Sound and music, all made by script for this game (no stock audio). Each tool has its own spray sound that rises in pitch with Heat Output and gets bigger with Wider Nozzle and Longer Reach; the ice hisses, cracks (lower and louder the deeper you go, and the lake's thick ice "sings") and drips; loose chunks crack off; finds break free with a jingle that gets grander with rarity; footsteps crunch on snow, thud on earth and knock on the shed's boards; a bell over the shed door; penguins squawk, the sauna crew splash their stones, Kevin's bombs boom, whistle and hiss; the gate creaks open; wind, then birdsong as the valley greens. Five cozy tunes (two for the valley, two for the lake, one for summer) take turns with quiet stretches between. Music and effects volume and Mute are in the catalogue (M on a computer). The game goes quiet during ads and when the browser tab is hidden | `scripts/audio/sound.gd`, `audio/`, `art/audio/` |
 | Autosave every 10s and when the app is backgrounded (`user://save3d.json`), glacier included | `GameState` |
 
 **Developer menu:** when you run from the editor, and in exports tagged `playtest` (the web build), the end of the **catalogue** (the book on the table inside the shed door) has free meltwater, a x10/x100 melting speed toggle, "melt everything" and "start over". Other release exports hide it. Remove `playtest` from the Web preset's `custom_features` before a public launch.
@@ -119,6 +120,9 @@ scripts/ui_theme.gd      shared UI look, emoji font, particle texture
 scripts/shop_row.gd      one catalogue row
 scripts/ad_offers.gd     when the HUD's timed ad-offer tag shows up, and which reward it offers
 scripts/fmt.gd           1.23K / 4.5M number formatting
+scripts/audio/sound.gd   autoload "Sound": every sound effect, the music and the ambience, plus the volume settings
+audio/                   the sounds (sfx/), wind and birds (amb/) and the music (music/), built by art/audio/
+default_bus_layout.tres  audio buses: Music, Ambience, SFX
 scripts/monetization/    ad + IAP interface, stub provider, autoload facade
 shaders/                 ice, mountain rock and snow, sky, water, shed wood, the tools' flames and sparks
 fonts/                   subset Noto Color Emoji (the placeholder art) + license
