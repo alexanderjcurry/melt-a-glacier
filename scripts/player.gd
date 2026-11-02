@@ -33,6 +33,9 @@ var pitch := -0.15
 var camera: Camera3D
 var target: Dictionary = {"hit": false}   # what the crosshair points at: {hit, pos, normal, dist}
 var heat := 0.0                     # 0..1, how hard the tool is working (the ice glows)
+var tool_active := false            # the tool is switched on (melting held down)
+var steps := 0                      # footsteps taken (Sound plays one each time this goes up)
+var on_ice := false                 # standing on a glacier rather than the ground
 
 var _shape: CollisionShape3D
 var _head: Node3D
@@ -219,7 +222,22 @@ func _move(delta: float) -> void:
 		velocity = Vector3.ZERO
 	position = p
 	if on_floor and mv.length() > 0.1:
+		var before_bob := _bob_t
 		_bob_t += delta * speed * 2.2
+		if floori(_bob_t / PI) != floori(before_bob / PI):
+			steps += 1   # a foot comes down twice per bob of the camera
+			on_ice = _floor_is_ice()
+
+
+func _floor_is_ice() -> bool:
+	for i in get_slide_collision_count():
+		var c := get_slide_collision(i)
+		if c.get_normal().y < 0.5:
+			continue
+		for g in _all_grids():
+			if c.get_collider() == (g as IceField).body:
+				return true
+	return false
 
 
 func _slide(delta: float) -> void:
@@ -342,6 +360,7 @@ func _update_tool(delta: float) -> void:
 	var reach := GameState.tool_range()
 	target = ray(reach)
 	var active := melting and input_enabled and not GameState.has_won
+	tool_active = active
 	var aim_point: Vector3 = target.pos if target.hit else camera.global_position + aim_dir() * reach
 	_fx.update(active, camera.global_transform * NOZZLE, aim_point, target.hit,
 		target.normal if target.hit else -aim_dir(), delta)

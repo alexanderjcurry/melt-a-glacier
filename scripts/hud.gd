@@ -56,6 +56,7 @@ var _too_far := false
 var _ending_shown := false
 var find_hint: Callable                # World.find_hint_at: a find frozen near this spot, or -1
 var _find_card: Control
+var _hinted := {}                      # finds whose "something's frozen in here" has chimed
 var _offer_header: Label
 var _offer_title: Label
 var _offer_pitch: Label
@@ -133,6 +134,7 @@ func _on_purchase_error(_id: String, reason: String) -> void:
 
 func _on_purchases_changed() -> void:
 	if catalogue_open:
+		Sound.jingle("purchase", -2.0, 2.5)
 		_rebuild_catalogue()
 
 
@@ -205,6 +207,7 @@ func _build_top() -> void:
 	respawn_button.add_theme_font_size_override("font_size", 21)
 	UiTheme.colored_button(respawn_button, Color(0.5, 0.62, 0.72))
 	respawn_button.pressed.connect(_on_respawn_pressed)
+	respawn_button.set_meta("silent", true)   # (it has its own sound)
 	root.add_child(respawn_button)
 
 	var mid := VBoxContainer.new()
@@ -246,6 +249,7 @@ func _build_top() -> void:
 	catalogue_button.add_theme_font_size_override("font_size", 25)
 	UiTheme.colored_button(catalogue_button, Color(0.72, 0.3, 0.2))
 	catalogue_button.pressed.connect(toggle_catalogue)
+	catalogue_button.set_meta("silent", true)
 	right.add_child(catalogue_button)
 	_build_offer_tag()
 
@@ -444,6 +448,9 @@ func _refresh() -> void:
 		var near: int = find_hint.call(t.pos) if find_hint.is_valid() else -1
 		if near >= 0:
 			target_label.text += "\n" + _tease(near)
+			if not _hinted.has(near):
+				_hinted[near] = true
+				Sound.play("find_hint", -5.0 + 1.5 * int(Balance.DISCOVERIES[near].get("rarity", 0)))
 	elif _too_far:
 		target_label.text = "Too far away. Walk closer"
 	else:
@@ -651,6 +658,7 @@ func _update_offer(delta: float) -> void:
 
 
 func _show_offer_tag() -> void:
+	Sound.play("offer_tag", -5.0)
 	_offer_t = 0.0
 	_offer_swing = 1.0
 	offer_tag.visible = true
@@ -699,6 +707,8 @@ func watch_ad(kind: String) -> void:
 				_hide_offer_tag()
 		if not is_blocking():
 			player.input_enabled = true
+		if ok:
+			Sound.jingle("reward", -3.0, 1.5)
 		toast(text if ok else "No reward this time")
 		if catalogue_open:
 			_rebuild_catalogue())
@@ -826,6 +836,7 @@ func open_catalogue() -> void:
 	if catalogue_open:
 		return
 	catalogue_open = true
+	Sound.play("book_open", -3.0, 1.0, 0.04)
 	offer_tag.visible = false
 	catalogue_button.visible = false
 	shop_card.visible = false
@@ -875,6 +886,7 @@ func open_catalogue() -> void:
 	close.custom_minimum_size = Vector2(170, 60)
 	UiTheme.colored_button(close, BROWN)
 	close.pressed.connect(close_catalogue)
+	close.set_meta("silent", true)
 	head.add_child(close)
 	var rule := ColorRect.new()
 	rule.color = BROWN
@@ -897,6 +909,7 @@ func close_catalogue() -> void:
 	if not catalogue_open:
 		return
 	catalogue_open = false
+	Sound.play("book_close", -4.0, 1.0, 0.04)
 	_row_refreshers.clear()
 	if _catalogue != null:
 		_catalogue.queue_free()
@@ -969,6 +982,17 @@ func _build_catalogue_rows() -> void:
 		Monetization.restore()
 		toast("Restore requested"))
 
+	_section("🔊 Sound")
+	_volume_row("🎵", "Music", "Cozy tunes now and then, with quiet stretches between.",
+		func(): return Sound.music_volume, Sound.set_music_volume)
+	_volume_row("🔔", "Sound effects", "Tools, ice, footsteps, wind, the shed and your crew.",
+		func(): return Sound.sfx_volume, Sound.set_sfx_volume)
+	var mute := _row("🔇", "Mute everything", "On a computer, M does this too.")
+	_row_refreshers.append(func(): mute.set_button("Unmute" if Sound.muted else "Mute", true))
+	mute.button.pressed.connect(func():
+		Sound.set_muted(not Sound.muted)
+		_refresh_rows())
+
 	# Dev tools: in the editor, and in exports tagged "playtest" (the web build).
 	# Remove the tag from export_presets.cfg before shipping.
 	if OS.is_debug_build() or OS.has_feature("playtest"):
@@ -993,6 +1017,46 @@ func _build_catalogue_rows() -> void:
 		wipe.button.pressed.connect(func():
 			GameState.wipe_save()
 			get_tree().reload_current_scene())
+
+
+func _volume_row(icon: String, title: String, desc: String, get_v: Callable, set_v: Callable) -> void:
+	## A volume knob in the catalogue: quieter / louder in tenths, with a gauge.
+	var row := _row(icon, title, desc)
+	var h := row.button.get_parent()
+	var gauge := ProgressBar.new()
+	gauge.show_percentage = false
+	gauge.max_value = 1.0
+	gauge.custom_minimum_size = Vector2(170, 26)
+	gauge.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	gauge.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	UiTheme.bar_styles(gauge, Color(0.38, 0.7, 0.4))
+	h.add_child(gauge)
+	h.move_child(gauge, row.button.get_index())
+	var quieter := Button.new()
+	UiTheme.no_keyboard(quieter)
+	quieter.custom_minimum_size = Vector2(76, 76)
+	quieter.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	quieter.text = "-"
+	UiTheme.colored_button(quieter, Color(0.38, 0.7, 0.4))
+	h.add_child(quieter)
+	h.move_child(quieter, gauge.get_index())
+	row.button.custom_minimum_size = Vector2(76, 76)
+	var step := func(d: float):
+		set_v.call(snappedf(clampf(float(get_v.call()) + d, 0.0, 1.0), 0.1))
+		_refresh_rows()
+	quieter.pressed.connect(step.bind(-0.1))
+	row.button.pressed.connect(step.bind(0.1))
+	_row_refreshers.append(func():
+		var v := float(get_v.call())
+		gauge.value = v
+		row.set_title("%s  %d%%" % [title, int(round(v * 100.0))] if v > 0.0 else "%s  (off)" % title)
+		quieter.disabled = v <= 0.0
+		row.set_button("+", v < 1.0))
+
+
+func _refresh_rows() -> void:
+	for r in _row_refreshers:
+		r.call()
 
 
 func _ad_row(kind: String) -> void:
@@ -1134,6 +1198,7 @@ func show_levels() -> void:
 	## coming soon (LevelMenu).
 	if catalogue_open:
 		close_catalogue()
+	Sound.play("level_menu", -3.0)
 	Input.mouse_mode = Input.MOUSE_MODE_VISIBLE
 	player.input_enabled = false
 	touch.release_all()

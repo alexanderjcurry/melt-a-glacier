@@ -344,6 +344,7 @@ func update(delta: float, aimed: Dictionary) -> void:
 		_hilite = want
 		if _hilite >= 0:
 			_set_hilite(items[_hilite], true)
+			Sound.play("hover", -8.0, 1.0, 0.1)
 	if _hilite >= 0:
 		var it: Dictionary = items[_hilite]
 		var node: Node3D = it.node

@@ -32,3 +32,17 @@ round phone buttons as nine-patch images. Grey parts are tinted in the game
 
 Fonts (SIL Open Font License, in `fonts/`): Lilita One for titles and
 buttons, Nunito ExtraBold for everything else.
+
+## Sound and music (`art/audio/` -> `audio/`)
+
+numpy and scipy synthesize everything (`pip install numpy scipy`, plus ffmpeg
+with libvorbis for the .ogg files). `synth.py` is the kit (oscillators, noise,
+filters, plucked strings, bells, reverb, seamless loops); `make_sfx.py` builds
+the sound effects and ambience, and `make_music.py` composes and plays the five
+tunes on little synthesized instruments (felt piano, music box, kalimba,
+celesta, flute, pad, plucked bass, pizzicato, shaker). The melodies and chords
+are written out by hand in that file. See `audio/README.md` for the commands.
+
+Style: cozy and a bit handmade. Wood, paper, bells and water rather than
+whooshy "UI" sounds; the money is meltwater, so buying things glugs.
+
