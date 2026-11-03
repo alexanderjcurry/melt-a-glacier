@@ -13,7 +13,7 @@ lake ice is gone summer comes back. A run takes roughly 35 to 70 minutes.
 
 ## Play it on your phone (iPhone or Android)
 
-**https://alexanderjcurry.github.io/melt-a-glacier/**
+**https://gamequarryllc.github.io/melt-a-glacier/**
 
 Open the link in Safari (or Chrome on Android) and turn the phone sideways.
 For a full-screen, app-like version on iPhone, tap **Share > Add to Home Screen**

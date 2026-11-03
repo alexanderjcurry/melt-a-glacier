@@ -51,7 +51,7 @@ const TEST_INTERSTITIAL := {
 }
 
 # --- Links shown in the game ---------------------------------------------------------------
-const PRIVACY_POLICY_URL := "https://alexanderjcurry.github.io/melt-a-glacier/privacy.html"
+const PRIVACY_POLICY_URL := "https://gamequarryllc.github.io/melt-a-glacier/privacy.html"
 
 
 static func platform() -> String:

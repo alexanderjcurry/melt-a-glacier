@@ -49,7 +49,7 @@ The bundle id can never change once the app is in either store.
    - Data used to track you: Device ID (advertising), *only via AdMob*.
    - Data linked to you: none. Data not linked to you: Purchase History (RevenueCat),
      Device ID, Product Interaction, Advertising Data, Coarse Location (AdMob).
-   - Privacy policy URL: `https://alexanderjcurry.github.io/melt-a-glacier/privacy.html`
+   - Privacy policy URL: `https://gamequarryllc.github.io/melt-a-glacier/privacy.html`
 6. **Age rating**: no objectionable content; answer "Yes" to "contains ads".
 
 ## 2. AdMob

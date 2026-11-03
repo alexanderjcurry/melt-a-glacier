@@ -1,7 +1,7 @@
 name: Build and publish web version
 
 # Every push to main runs the smoke test, exports the game for the web, and
-# publishes it to GitHub Pages: https://alexanderjcurry.github.io/melt-a-glacier/
+# publishes it to GitHub Pages: https://gamequarryllc.github.io/melt-a-glacier/
 # One-time setup: repo Settings > Pages > Source: "GitHub Actions".
 
 on:
