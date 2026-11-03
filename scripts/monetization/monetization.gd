@@ -6,11 +6,13 @@ extends Node
 ##   Monetization.buy(Monetization.PRODUCT_REMOVE_ADS_2X)
 ##   Monetization.maybe_show_interstitial("shed_exit")
 ##
-## Swapping in real SDKs: implement a MonetizationProvider subclass (see
-## README "Adding real ads & purchases") and return it from _create_provider().
+## Providers: on Android/iOS the real one (MobileMonetizationProvider: AdMob +
+## RevenueCat, ids in store_config.gd). In the editor and playtest/web builds,
+## the stub with pretend ads and free purchases. See docs/LAUNCH.md.
 
 signal purchases_changed
 signal purchase_error(product_id: String, reason: String)
+signal restore_done(found: int, error: String)
 
 # Rewarded ad placements (use these as AdMob ad unit keys too). Each one is a
 # reward in Balance.AD_REWARDS, offered in the catalogue and on the HUD's
@@ -42,16 +44,33 @@ func _ready() -> void:
 	provider.purchase_succeeded.connect(_grant)
 	provider.purchase_restored.connect(_grant)
 	provider.purchase_failed.connect(func(id, reason): purchase_error.emit(id, reason))
+	provider.restore_finished.connect(func(found, error): restore_done.emit(found, error))
 	provider.interstitial_closed.connect(func(_p): _interstitial_open = false)
 	provider.initialize()
 	_last_interstitial = Time.get_unix_time_from_system()
 
 
 func _create_provider() -> MonetizationProvider:
-	# TODO when shipping: detect the plugin and return the real provider, e.g.
-	#   if Engine.has_singleton("PoingGodotAdMob"):
-	#       return preload("res://scripts/monetization/admob_provider.gd").new()
-	return StubMonetizationProvider.new()
+	var os_name := OS.get_name()
+	if (os_name == "Android" or os_name == "iOS") and not OS.has_feature("stub_store"):
+		return MobileMonetizationProvider.new()
+	if OS.is_debug_build() or OS.has_feature("playtest") or OS.has_feature("stub_store"):
+		return StubMonetizationProvider.new()
+	return MonetizationProvider.new()   # e.g. a release desktop build: no ads, no store
+
+
+func provider_name() -> String:
+	return provider.provider_name()
+
+
+# --- Privacy (ad consent) ------------------------------------------------------------------
+func privacy_options_required() -> bool:
+	## Show a "Privacy settings" button when this is true (EEA/UK players).
+	return provider.privacy_options_required()
+
+
+func show_privacy_options() -> void:
+	provider.show_privacy_options()
 
 
 # --- Rewarded ------------------------------------------------------------------------
@@ -141,15 +160,18 @@ func restore() -> void:
 
 
 func _grant(product_id: String) -> void:
+	if not PRODUCTS.has(product_id):
+		push_warning("Unknown product: %s" % product_id)
+		return
+	if owns(product_id):
+		return   # restores and store updates repeat grants; keep the player's settings
 	match product_id:
 		PRODUCT_REMOVE_ADS_2X:
 			GameState.owns_remove_ads_2x = true
+			provider.set_ads_removed(true)
 		PRODUCT_GOLDEN_DRYER:
 			GameState.owns_golden_dryer = true
 			GameState.golden_equipped = true
-		_:
-			push_warning("Unknown product: %s" % product_id)
-			return
 	GameState.save_game()
 	GameState.changed.emit()
 	purchases_changed.emit()

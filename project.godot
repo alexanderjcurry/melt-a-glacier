@@ -10,6 +10,11 @@ config/description="Walk a glacier in first person and melt it, one hair dryer a
 run/main_scene="res://scenes/world.tscn"
 config/features=PackedStringArray("4.4", "GL Compatibility")
 config/icon="res://icon.svg"
+config/version="1.0.0"
+boot_splash/bg_color=Color(0.25, 0.62, 0.91, 1)
+boot_splash/image="res://ui/icons/splash.png"
+boot_splash/fullsize=false
+boot_splash/use_filter=true
 
 [autoload]
 
@@ -29,6 +34,10 @@ window/size/viewport_height=720
 window/stretch/mode="canvas_items"
 window/stretch/aspect="expand"
 window/handheld/orientation=4
+
+[editor_plugins]
+
+enabled=PackedStringArray("res://addons/admob/plugin.cfg", "res://addons/godotx_revenue_cat/plugin.cfg")
 
 [input_devices]
 

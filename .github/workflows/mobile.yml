@@ -1,0 +1,190 @@
+name: Mobile builds
+
+# Pull requests: run the tests, build an Android App Bundle (signed with a
+# throwaway key) and export the iOS Xcode project, to prove both still build.
+#
+# Store release: push a tag like v1.0.3, or run this workflow by hand with
+# "release" ticked. The release check must pass (every store id filled in),
+# the bundle is signed with your upload key, and if the Play service account
+# secret is set it goes straight to the Play Console "internal testing" track.
+# The iPhone build itself runs on Codemagic (codemagic.yaml): it needs a Mac.
+#
+# Secrets (repo Settings > Secrets and variables > Actions), all optional for PRs:
+#   ANDROID_KEYSTORE_BASE64   base64 of your upload keystore (.jks)
+#   ANDROID_KEYSTORE_ALIAS    its key alias
+#   ANDROID_KEYSTORE_PASSWORD its password (store and key password the same)
+#   PLAY_SERVICE_ACCOUNT_JSON Play Console API service account key (JSON text)
+
+on:
+  pull_request:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      release:
+        description: "Store release (signed with the upload key, sent to Play internal testing)"
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: mobile-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    env:
+      RELEASE: ${{ startsWith(github.ref, 'refs/tags/v') || inputs.release == true }}
+      HAS_PLAY_KEY: ${{ secrets.PLAY_SERVICE_ACCOUNT_JSON != '' }}
+    steps:
+      - name: Check out
+        uses: actions/checkout@v4
+
+      - name: Read pinned versions
+        run: grep -E "^[A-Z_]+=" tools/plugin_versions.env >> "$GITHUB_ENV"
+
+      - name: Set up Java 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Restore Godot and plugins from cache
+        id: cache
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/godot
+            ~/.local/share/godot/export_templates
+            ~/.cache/melt-a-glacier-plugins
+          key: godot-${{ env.GODOT_VERSION }}-mobile-${{ hashFiles('tools/plugin_versions.env') }}-v1
+
+      - name: Download Godot and the Android + iOS export templates
+        if: steps.cache.outputs.cache-hit != 'true'
+        run: |
+          set -euo pipefail
+          base="https://github.com/godotengine/godot/releases/download/${GODOT_VERSION}-stable"
+          templates="$HOME/.local/share/godot/export_templates/${GODOT_VERSION}.stable"
+          mkdir -p ~/godot "$templates"
+          curl -fsSL --retry 3 -o /tmp/godot.zip "$base/Godot_v${GODOT_VERSION}-stable_linux.x86_64.zip"
+          unzip -q /tmp/godot.zip -d /tmp/godot-unzip
+          mv "/tmp/godot-unzip/Godot_v${GODOT_VERSION}-stable_linux.x86_64" ~/godot/godot
+          curl -fsSL --retry 3 -o /tmp/templates.tpz "$base/Godot_v${GODOT_VERSION}-stable_export_templates.tpz"
+          unzip -q -j /tmp/templates.tpz 'templates/android_source.zip' 'templates/ios.zip' 'templates/version.txt' -d "$templates"
+          rm -rf /tmp/godot.zip /tmp/godot-unzip /tmp/templates.tpz
+
+      - name: Point Godot at the Android SDK and Java
+        run: |
+          mkdir -p ~/.config/godot
+          v="$(echo "$GODOT_VERSION" | cut -d. -f1-2)"
+          cat > ~/.config/godot/editor_settings-$v.tres <<EOF
+          [gd_resource type="EditorSettings" format=3]
+
+          [resource]
+          export/android/android_sdk_path = "$ANDROID_HOME"
+          export/android/java_sdk_path = "$JAVA_HOME"
+          EOF
+          cat ~/.config/godot/editor_settings-$v.tres
+
+      - name: Fetch the native ad and store plugins
+        run: bash tools/fetch_plugins.sh all
+
+      - name: Import project
+        run: timeout 600 ~/godot/godot --headless --import
+
+      - name: Smoke test
+        run: timeout 300 ~/godot/godot --headless -s res://tests/smoke_test.gd
+
+      - name: Ads and purchases test
+        run: timeout 120 ~/godot/godot --headless -s res://tests/monetization_test.gd
+
+      - name: Release check (every store id filled in)
+        if: env.RELEASE == 'true'
+        run: |
+          ~/godot/godot --headless -s res://tests/release_check.gd -- Android
+          ~/godot/godot --headless -s res://tests/release_check.gd -- iOS
+
+      - name: Set the version code
+        run: |
+          # Play needs a higher versionCode for every upload: use the run number.
+          sed -i "s/^version\/code=.*/version\/code=$((100 + GITHUB_RUN_NUMBER))/" export_presets.cfg
+          if [[ "$GITHUB_REF" == refs/tags/v* ]]; then
+            sed -i "s/^version\/name=.*/version\/name=\"${GITHUB_REF_NAME#v}\"/" export_presets.cfg
+          fi
+          grep -E "^version/" export_presets.cfg
+
+      - name: Signing key
+        env:
+          KEYSTORE_B64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          KEYSTORE_ALIAS: ${{ secrets.ANDROID_KEYSTORE_ALIAS }}
+          KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+        run: |
+          set -euo pipefail
+          mkdir -p ~/keys
+          if [ -n "$KEYSTORE_B64" ]; then
+            echo "$KEYSTORE_B64" | base64 -d > ~/keys/upload.jks
+            alias="$KEYSTORE_ALIAS"; pass="$KEYSTORE_PASSWORD"
+          elif [ "$RELEASE" = "true" ]; then
+            echo "::error::A store release needs the ANDROID_KEYSTORE_* secrets."; exit 1
+          else
+            echo "No upload key in secrets: signing this test build with a throwaway key."
+            alias=throwaway; pass=throwaway
+            keytool -genkeypair -keystore ~/keys/upload.jks -alias "$alias" -keyalg RSA -keysize 2048 \
+              -validity 10000 -storepass "$pass" -keypass "$pass" -dname "CN=Throwaway" -noprompt
+          fi
+          {
+            echo "GODOT_ANDROID_KEYSTORE_RELEASE_PATH=$HOME/keys/upload.jks"
+            echo "GODOT_ANDROID_KEYSTORE_RELEASE_USER=$alias"
+            echo "GODOT_ANDROID_KEYSTORE_RELEASE_PASSWORD=$pass"
+          } >> "$GITHUB_ENV"
+
+      - name: Export Android App Bundle
+        run: |
+          mkdir -p build/android
+          timeout 1500 ~/godot/godot --headless --install-android-build-template \
+            --export-release "Android" build/android/melt-a-glacier.aab
+          test -s build/android/melt-a-glacier.aab
+          ls -la build/android
+          # The ad and store SDKs must be inside, with the AdMob app id in the manifest.
+          unzip -o -q build/android/melt-a-glacier.aab 'base/dex/*' 'base/manifest/*' -d /tmp/aab
+          for sdk in com/revenuecat/purchases com/google/android/libraries/ads/mobile/sdk com/poingstudios; do
+            if grep -rqa "$sdk" /tmp/aab/base/dex; then echo "found $sdk"; else echo "::error::$sdk missing from the bundle"; exit 1; fi
+          done
+          grep -qa "APPLICATION_ID" /tmp/aab/base/manifest/AndroidManifest.xml && echo "AdMob app id meta-data present"
+
+      - name: Export iOS Xcode project (checks the iOS plugins and settings)
+        run: |
+          mkdir -p build/ios
+          # Godot insists on a team id; the real one is set on Codemagic.
+          sed -i 's/^application\/app_store_team_id=""/application\/app_store_team_id="ABCDE12345"/' export_presets.cfg
+          timeout 900 ~/godot/godot --headless --export-release "iOS" build/ios/MeltAGlacier.ipa || true
+          test -d build/ios/MeltAGlacier.xcodeproj
+          plist="$(grep -rl --include='*.plist' CFBundleIdentifier build/ios | head -1)"
+          echo "Info.plist: $plist"
+          grep -q GADApplicationIdentifier "$plist"
+          grep -q SKAdNetworkItems "$plist"
+          grep -q NSUserTrackingUsageDescription "$plist"
+          grep -q GodotxRevenueCat build/ios/MeltAGlacier.xcodeproj/project.pbxproj && echo "RevenueCat linked"
+          grep -q -i admob build/ios/MeltAGlacier.xcodeproj/project.pbxproj && echo "AdMob linked"
+          ls build/ios
+
+      - name: Upload the App Bundle
+        uses: actions/upload-artifact@v4
+        with:
+          name: android-aab-${{ github.run_number }}
+          path: build/android/*.aab
+          retention-days: 14
+
+      - name: Send to Google Play (internal testing)
+        if: env.RELEASE == 'true' && env.HAS_PLAY_KEY == 'true'
+        uses: r0adkll/upload-google-play@v1
+        with:
+          serviceAccountJsonPlainText: ${{ secrets.PLAY_SERVICE_ACCOUNT_JSON }}
+          packageName: com.gamequarry.meltaglacier
+          releaseFiles: build/android/melt-a-glacier.aab
+          track: internal
+          status: completed

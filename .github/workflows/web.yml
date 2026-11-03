@@ -1,7 +1,7 @@
 name: Build and publish web version
 
 # Every push to main runs the smoke test, exports the game for the web, and
-# publishes it to GitHub Pages: https://alexanderjcurry.github.io/melt-a-glacier/
+# publishes it to GitHub Pages: https://gamequarryllc.github.io/melt-a-glacier/
 # One-time setup: repo Settings > Pages > Source: "GitHub Actions".
 
 on:
@@ -18,15 +18,15 @@ concurrency:
   group: pages
   cancel-in-progress: true
 
-env:
-  GODOT_VERSION: "4.4.1"
-
 jobs:
   build:
     runs-on: ubuntu-24.04
     steps:
       - name: Check out
         uses: actions/checkout@v4
+
+      - name: Read pinned versions
+        run: grep -E "^[A-Z_]+=" tools/plugin_versions.env >> "$GITHUB_ENV"
 
       - name: Restore Godot from cache
         id: godot-cache
@@ -63,6 +63,8 @@ jobs:
           mkdir -p build/web
           timeout 600 ~/godot/godot --headless --export-release "Web" build/web/index.html
           test -s build/web/index.wasm
+          # The privacy policy the stores link to lives next to the game.
+          cp docs/privacy.html build/web/privacy.html
           ls -la build/web
 
       - name: Upload the build for Pages
