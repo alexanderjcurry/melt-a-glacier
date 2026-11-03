@@ -23,6 +23,10 @@ workflows:
       xcode: latest
       vars:
         PROJECT: build/ios/MeltAGlacier.xcodeproj
+        # "false" = a TestFlight preview: Google's test ads, store ids may still
+        # be empty. Tags (v1.0.3) and STORE_RELEASE=true make a real store build,
+        # which refuses to build until every id in store_config.gd is filled in.
+        STORE_RELEASE: "false"
     triggering:
       events:
         - tag
@@ -62,7 +66,18 @@ workflows:
           "$GODOT" --headless --import
           "$GODOT" --headless -s res://tests/smoke_test.gd
           "$GODOT" --headless -s res://tests/monetization_test.gd
-          "$GODOT" --headless -s res://tests/release_check.gd -- iOS
+          if [[ "$STORE_RELEASE" == "true" || "${CM_TAG:-}" == v* ]]; then
+            "$GODOT" --headless -s res://tests/release_check.gd -- iOS
+          else
+            echo "Preview build: skipping the store-id check; test ads on."
+            python3 - <<'PY'
+          import re
+          s = open("export_presets.cfg").read()
+          s = re.sub(r'(name="iOS"\nplatform="iOS"\n(?:.*\n)*?custom_features=)""', r'\1"test_ads"', s, count=1)
+          open("export_presets.cfg", "w").write(s)
+          PY
+            grep -A4 'name="iOS"' export_presets.cfg | grep custom_features
+          fi
 
       - name: Team id and build number
         script: |

@@ -61,7 +61,9 @@ static func platform() -> String:
 
 
 static func use_test_ads() -> bool:
-	return OS.is_debug_build()
+	## Debug builds, and TestFlight preview builds (export feature "test_ads",
+	## set by codemagic.yaml), show Google's test ads instead of live ones.
+	return OS.is_debug_build() or OS.has_feature("test_ads")
 
 
 static func revenuecat_key() -> String:

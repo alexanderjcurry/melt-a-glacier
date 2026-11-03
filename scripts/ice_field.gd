@@ -16,6 +16,7 @@ extends Node3D
 
 signal ice_melted(at: Vector3, volume: float, value: float)   # m³ that just turned to water, and their hp x m³ x worth
 signal find_exposed(find: int)
+signal chunk_loosened(at: Vector3, volume: float)   # a bit of ice came loose and starts melting away by itself
 
 const CH := 8                    # chunk size in cells, along x and z
 const MELT_K := 0.3              # tool hp -> density. A point of fresh snow takes 0.25 / MELT_K hp
@@ -90,6 +91,7 @@ var _cur_grounded := false
 var _floating := PackedInt32Array()    # points melting away by themselves
 var _float_t := 0.0
 var _drips: CPUParticles3D             # meltwater dripping off them
+var loose_drip_at := Vector3.INF       # where loose ice is dripping right now (for its sound)
 
 
 # =====================================================================================
@@ -887,6 +889,11 @@ func _collect_floating() -> void:
 		if f[s] > 0.0 and f[s] <= 0.5:
 			keep.append(s)
 	var nruns := _runs.size() / 3
+	var was := {}
+	for s in _floating:
+		was[s] = true
+	var fresh := 0
+	var fresh_at := Vector3.ZERO
 	for r in nruns:
 		var g := _group[r]
 		if g < 0 or g >= _group_melts.size() or _group_melts[g] == 0:
@@ -896,7 +903,12 @@ func _collect_floating() -> void:
 			var s := c + plane * j
 			if f[s] > 0.5:
 				keep.append(s)
+				if not was.has(s):
+					fresh += 1
+					fresh_at += point_pos(s)
 	_floating = keep
+	if fresh > 0:
+		chunk_loosened.emit(fresh_at / float(fresh), fresh * point_volume)
 
 
 func _drip_from(lo: Vector3, hi: Vector3) -> void:
@@ -985,8 +997,11 @@ func _melt_floating(dt: float) -> void:
 	if drip >= 0:
 		var p := point_pos(drip)
 		_drip_from(p - Vector3(0.3, 0.25, 0.3), p + Vector3(0.3, -0.25, 0.3))
-	elif _drips != null:
-		_drips.emitting = false
+		loose_drip_at = p
+	else:
+		loose_drip_at = Vector3.INF
+		if _drips != null:
+			_drips.emitting = false
 	if melted > 0:
 		remaining -= melted
 		ice_melted.emit(at / float(melted), melted * point_volume, hp_sum * point_volume * worth)

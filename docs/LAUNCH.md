@@ -13,6 +13,14 @@ the first kind and the reason for the second rule. Make it private before
 launch if you prefer (note: GitHub Pages, which hosts the web playtest and the
 privacy policy, needs a paid GitHub plan for private repos).
 
+## Fastest path: the game on your iPhone through TestFlight
+
+You don't need AdMob or RevenueCat for this. A preview build shows Google's test ads, and purchases say the store isn't available yet.
+
+1. Apple: register the bundle id and create the app record (section 1, steps 1 and 4 only).
+2. Codemagic: section 4.
+3. Start a build with `STORE_RELEASE` left at `false`. Then install TestFlight on the iPhone and accept the invite.
+
 ## 0. Decide two permanent things
 
 | What | Proposed | Where it's used |
